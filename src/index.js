@@ -6,7 +6,13 @@ import { loadConfig, setupWizard } from './config.js';
 import { runCLI } from './cli.js';
 import { runWeb } from './web/server.js';
 import { runDaemon } from './daemon.js';
-import { createJob, jobsFilePath, listJobs, removeJob, updateJob } from './daemon_store.js';
+import {
+  createFileDeleteTask,
+  listTasks,
+  removeTask,
+  tasksFilePath,
+  updateTask,
+} from './automation/store/tasks.js';
 
 function getArg(flag) {
   const idx = argv.indexOf(flag);
@@ -26,18 +32,18 @@ function parseModeFromArgs() {
 }
 
 function printJobs() {
-  const jobs = listJobs();
+  const jobs = listTasks();
   if (!jobs.length) {
     console.log('No daemon jobs found.');
-    console.log(`Jobs file: ${jobsFilePath()}`);
+    console.log(`Jobs file: ${tasksFilePath()}`);
     return;
   }
-  console.log(`Jobs file: ${jobsFilePath()}`);
+  console.log(`Jobs file: ${tasksFilePath()}`);
   for (const job of jobs) {
     console.log(
       [
         `id=${job.id}`,
-        `name=${job.name}`,
+        `task_id=${job.task_id}`,
         `enabled=${Boolean(job.enabled)}`,
         `interval=${job.interval_sec}s`,
         `last_status=${job.last_status || 'idle'}`,
@@ -53,20 +59,22 @@ function handleJobCommands() {
   }
 
   if (hasArg('--job-add')) {
-    const name = getArg('--name');
-    const objective = getArg('--objective');
+    const taskId = getArg('--task-id') || getArg('--name');
+    const path = getArg('--path');
     const interval = getArg('--interval');
     const origin = getArg('--origin');
-    if (!name || !objective || !interval || !origin) {
-      console.log('Usage: --job-add --name "<name>" --interval <seconds> --origin <conversation_id> --objective "<task>"');
+    const endAt = getArg('--end-at');
+    if (!taskId || !path || !interval || !origin) {
+      console.log('Usage: --job-add --task-id "<id>" --path "<absolute_path>" --interval <seconds> --origin <conversation_id> [--end-at <ISO8601>]');
       return true;
     }
-    const job = createJob({
-      name,
-      objective,
+    const job = createFileDeleteTask({
+      task_id: taskId,
+      file_path: path,
       interval_sec: interval,
       origin_conversation_id: origin,
-      enabled: true,
+      end_at: endAt || null,
+      notify: true,
     });
     console.log(`Job created: ${job.id}`);
     return true;
@@ -78,7 +86,7 @@ function handleJobCommands() {
       console.log('Usage: --job-remove <job_id>');
       return true;
     }
-    const ok = removeJob(id);
+    const ok = removeTask(id);
     console.log(ok ? `Job removed: ${id}` : `Job not found: ${id}`);
     return true;
   }
@@ -89,7 +97,7 @@ function handleJobCommands() {
       console.log('Usage: --job-enable <job_id>');
       return true;
     }
-    const updated = updateJob(id, { enabled: true });
+    const updated = updateTask(id, { enabled: true, status: 'running' });
     console.log(`Job enabled: ${updated.id}`);
     return true;
   }
@@ -100,7 +108,7 @@ function handleJobCommands() {
       console.log('Usage: --job-disable <job_id>');
       return true;
     }
-    const updated = updateJob(id, { enabled: false });
+    const updated = updateTask(id, { enabled: false });
     console.log(`Job disabled: ${updated.id}`);
     return true;
   }

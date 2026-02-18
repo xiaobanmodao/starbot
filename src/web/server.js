@@ -1,4 +1,4 @@
-import { createServer } from 'http';
+﻿import { createServer } from 'http';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -17,7 +17,7 @@ import {
   renameConversation,
   saveConversation,
 } from '../history/store.js';
-import { listPendingResults, markResultsReported } from '../result_store.js';
+import { collectConversationSummary, markSummaryReported } from '../automation/chat/reporting.js';
 
 const WEB_DIR = join(process.cwd(), 'src', 'web');
 const sessions = new Map();
@@ -220,19 +220,11 @@ export async function runWeb(cfg, options = {}) {
         });
         writeSse(res, 'session', { sessionId });
 
-        const pending = listPendingResults(sessionId);
-        if (pending.length) {
-          const summary = [
-            '后台任务更新：',
-            ...pending.map((item, idx) => {
-              const ts = item.created_at ? new Date(item.created_at).toLocaleString() : '';
-              const job = item.job_id ? ` [job:${item.job_id}]` : '';
-              return `${idx + 1}. ${item.summary || '任务完成'}${ts ? ` (${ts})` : ''}${job}`;
-            }),
-          ].join('\n');
+                const summary = collectConversationSummary(sessionId);
+        if (summary) {
           writeSse(res, 'answer_start', {});
-          writeSse(res, 'answer', { chunk: `${summary}\n\n` });
-          markResultsReported(pending.map((item) => item.id));
+          writeSse(res, 'answer', { chunk: `${summary.text}\n\n` });
+          markSummaryReported(summary.resultIds);
         }
 
         let sawTool = false;
@@ -302,3 +294,4 @@ export async function runWeb(cfg, options = {}) {
   console.log(`Web UI running at ${url}`);
   if (autoOpen) openBrowser(url);
 }
+

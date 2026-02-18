@@ -2,12 +2,12 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { tool } from './registry.js';
 import {
-  createJob,
-  listJobs,
-  loadDaemonState,
-  removeJob,
-  updateJob,
-} from '../daemon_store.js';
+  createFileDeleteTask,
+  listTasks,
+  removeTask,
+  updateTask,
+} from '../automation/store/tasks.js';
+import { loadDaemonState } from '../automation/store/daemon_state.js';
 
 function isPidAlive(pid) {
   const n = Number(pid);
@@ -34,7 +34,6 @@ function daemonStatus() {
 function startDaemonIfNeeded() {
   const current = daemonStatus();
   if (current.running) return current;
-
   const entry = join(process.cwd(), 'src', 'index.js');
   const child = spawn(process.execPath, [entry, '--daemon'], {
     detached: true,
@@ -45,90 +44,70 @@ function startDaemonIfNeeded() {
   return { running: true, pid: child.pid, started_at: new Date().toISOString() };
 }
 
-tool('unattended_create_job', 'Create a persistent unattended background job. Use when user asks AI to keep doing a task without repeated prompts.', {
+tool('unattended_watch_delete_file', 'Create unattended automation task: monitor an absolute file path and delete it as soon as it appears.', {
   properties: {
-    name: { type: 'string', description: 'Short job name' },
-    objective: { type: 'string', description: 'Detailed long-running objective' },
-    interval_sec: { type: 'number', description: 'Run interval in seconds (default 60)' },
-    system_notify: { type: 'boolean', description: 'Trigger OS notification when a run completes (default false)' },
-    auto_start_daemon: { type: 'boolean', description: 'Auto start daemon if not running (default true)' },
+    task_id: { type: 'string', description: 'Stable task id, e.g. auto_delete_desktop_file' },
+    file_path: { type: 'string', description: 'Absolute path to monitor and delete' },
+    interval_sec: { type: 'number', description: 'Polling interval in seconds (default 1)' },
+    end_at: { type: 'string', description: 'Optional ISO8601 end time; task will auto-complete at this time' },
+    system_notify: { type: 'boolean', description: 'Trigger OS notification on each completed delete event (default true)' },
+    auto_start_daemon: { type: 'boolean', description: 'Start daemon automatically if not running (default true)' },
   },
-  required: ['name', 'objective'],
-}, true, async ({ name, objective, interval_sec = 60, system_notify = false, auto_start_daemon = true }, context = {}) => {
+  required: ['task_id', 'file_path'],
+}, true, async ({ task_id, file_path, interval_sec = 1, end_at = null, system_notify = true, auto_start_daemon = true }, context = {}) => {
   const originConversationId = String(context?.origin_conversation_id || '').trim();
   if (!originConversationId) {
-    return JSON.stringify({
-      ok: false,
-      error: 'origin_conversation_id missing; this tool must be called from an active conversation.',
-    }, null, 2);
+    return JSON.stringify({ ok: false, error: 'origin_conversation_id missing' }, null, 2);
   }
-  const job = createJob({
-    name,
-    objective,
+  const task = createFileDeleteTask({
+    task_id,
+    file_path,
     interval_sec,
+    end_at,
+    notify: system_notify !== false,
     origin_conversation_id: originConversationId,
-    enabled: true,
   });
-  if (system_notify) {
-    updateJob(job.id, { system_notify: true });
-  }
-  let status = daemonStatus();
-  if (auto_start_daemon !== false) status = startDaemonIfNeeded();
-  return JSON.stringify({
-    ok: true,
-    job,
-    daemon: status,
-    message: 'Unattended job created.',
-  }, null, 2);
+  const daemon = auto_start_daemon === false ? daemonStatus() : startDaemonIfNeeded();
+  return JSON.stringify({ ok: true, task, daemon }, null, 2);
 });
 
-tool('unattended_list_jobs', 'List unattended background jobs and daemon status.', {
+tool('unattended_list_jobs', 'List unattended automation tasks and daemon status.', {
   properties: {},
   required: [],
-}, false, async () => {
-  return JSON.stringify({
-    daemon: daemonStatus(),
-    jobs: listJobs(),
-  }, null, 2);
-});
+}, false, async () => JSON.stringify({
+  daemon: daemonStatus(),
+  jobs: listTasks(),
+}, null, 2));
 
-tool('unattended_update_job', 'Update unattended job fields like enabled status, interval, objective, or name.', {
+tool('unattended_update_job', 'Update unattended automation task fields.', {
   properties: {
-    id: { type: 'string', description: 'Job id' },
-    enabled: { type: 'boolean', description: 'Enable/disable job' },
-    interval_sec: { type: 'number', description: 'Interval in seconds' },
-    system_notify: { type: 'boolean', description: 'Enable/disable OS notification' },
-    objective: { type: 'string', description: 'New objective text' },
-    name: { type: 'string', description: 'New name' },
+    id: { type: 'string', description: 'Task UUID id' },
+    enabled: { type: 'boolean', description: 'Enable or disable this task' },
+    interval_sec: { type: 'number', description: 'Polling interval in seconds' },
+    system_notify: { type: 'boolean', description: 'Enable or disable system notification' },
   },
   required: ['id'],
-}, true, async ({ id, enabled, interval_sec, system_notify, objective, name }) => {
+}, true, async ({ id, enabled, interval_sec, system_notify }) => {
   const patch = {};
   if (typeof enabled === 'boolean') patch.enabled = enabled;
   if (interval_sec !== undefined) patch.interval_sec = interval_sec;
-  if (typeof system_notify === 'boolean') patch.system_notify = system_notify;
-  if (objective !== undefined) patch.objective = objective;
-  if (name !== undefined) patch.name = name;
-  const updated = updateJob(id, patch);
-  return JSON.stringify({ ok: true, job: updated }, null, 2);
+  if (typeof system_notify === 'boolean') patch.notify = system_notify;
+  if (patch.enabled === true) patch.status = 'running';
+  const updated = updateTask(id, patch);
+  return JSON.stringify({ ok: true, task: updated }, null, 2);
 });
 
-tool('unattended_remove_job', 'Delete an unattended background job.', {
-  properties: {
-    id: { type: 'string', description: 'Job id' },
-  },
+tool('unattended_remove_job', 'Remove unattended automation task.', {
+  properties: { id: { type: 'string', description: 'Task UUID id' } },
   required: ['id'],
-}, true, async ({ id }) => {
-  const ok = removeJob(id);
-  return JSON.stringify({ ok, id }, null, 2);
-});
+}, true, async ({ id }) => JSON.stringify({ ok: removeTask(id), id }, null, 2));
 
-tool('unattended_daemon_status', 'Check whether unattended daemon is running.', {
+tool('unattended_daemon_status', 'Check unattended automation daemon status.', {
   properties: {},
   required: [],
 }, false, async () => JSON.stringify(daemonStatus(), null, 2));
 
-tool('unattended_daemon_start', 'Start unattended daemon process if not running.', {
+tool('unattended_daemon_start', 'Start unattended automation daemon.', {
   properties: {},
   required: [],
 }, true, async () => JSON.stringify(startDaemonIfNeeded(), null, 2));
