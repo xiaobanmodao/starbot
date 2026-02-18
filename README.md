@@ -100,20 +100,25 @@ python run.py --web
 - `/history`：切换历史会话
 - `/model`：切换模型
 - `/tools`：查看工具
+- `/auto start 秒数 任务`：启动后台自动任务循环
+- `/auto stop`：停止后台自动任务循环
+- `/auto status`：查看后台任务状态
 - `/config key value`：修改配置
 - `/clear`：清空当前会话
 - `/exit`：退出程序
 
 ## 持续工作模式
 
-StarBot 默认开启持续工作能力（`max_iterations = -1`）。
+StarBot 默认开启持续工作能力（`max_iterations = -1`），并支持后台自动执行模式。
 
 使用建议：
 
-1. 直接下达持续任务，例如：
-   - “每隔 30 秒抓取最新行情并分析趋势变化，直到我让你停止。”
-2. 如果需要限制轮次，可设置：`/config max_iterations N`
-3. 在命令行中可通过 `Ctrl + C` 终止持续任务
+1. 推荐使用后台自动模式（一次下达，自动循环）：
+   - `/auto start 30 每隔30秒抓取最新行情并分析趋势变化`
+2. 查看状态：`/auto status`
+3. 停止任务：`/auto stop`
+4. 如果需要限制单轮内部推理轮次，可设置：`/config max_iterations N`
+5. 在命令行中也可通过 `Ctrl + C` 终止程序
 
 ## 安全说明
 

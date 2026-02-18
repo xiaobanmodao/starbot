@@ -26,6 +26,7 @@ const COMMAND_HINTS = [
   { cmd: '/model', desc: 'select model' },
   { cmd: '/color', desc: 'switch color theme' },
   { cmd: '/history', desc: 'resume previous chat' },
+  { cmd: '/auto', desc: 'background auto task loop' },
   { cmd: '/config', desc: 'view/update config' },
   { cmd: '/clear', desc: 'clear conversation' },
   { cmd: '/exit', desc: 'exit' },
@@ -38,11 +39,19 @@ export async function runCLI(cfg) {
 
   let agent = new Agent(cfg);
   let currentConversationId = randomUUID();
+  const autoState = {
+    running: false,
+    stopRequested: false,
+    loopPromise: null,
+    objective: '',
+    intervalSec: 30,
+    round: 0,
+  };
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   readlineCore.emitKeypressEvents(process.stdin, rl);
 
   console.log(render.banner());
-  console.log(render.dimText('  /help  /new  /name  /delete  /tools  /model  /color  /history  /clear  /exit'));
+  console.log(render.dimText('  /help  /new  /name  /delete  /tools  /model  /color  /history  /auto  /clear  /exit'));
   if (custom.loaded.length) console.log(render.dimText(`  + ${custom.loaded.length} custom tools loaded`));
   if (custom.failed.length) console.log(render.errorText(`  ! ${custom.failed.length} custom tools failed to load`));
   console.log(render.dimText(`  history: ${historyDir()}`));
@@ -58,7 +67,12 @@ export async function runCLI(cfg) {
     if (!input) continue;
 
     if (input.startsWith('/')) {
-      const handled = await handleCommand(input, cfg, agent, rl, currentConversationId);
+      const cmdName = input.split(/\s+/)[0].toLowerCase();
+      if (autoState.running && cmdName !== '/auto' && cmdName !== '/exit') {
+        console.log(render.dimText('Auto mode is running. Only /auto and /exit are allowed now.\n'));
+        continue;
+      }
+      const handled = await handleCommand(input, cfg, agent, rl, currentConversationId, autoState);
       if (handled === 'exit') break;
       if (handled === 'reset') {
         agent = new Agent(cfg);
@@ -74,82 +88,12 @@ export async function runCLI(cfg) {
       }
       continue;
     }
-
-    let spin = render.createSpinner();
-    let spinnerActive = false;
-    let tokenRight = '(0 tokens)';
-    const startSpinner = (label) => {
-      spin.stop();
-      spin = render.createSpinner(label);
-      spin.setRightText(tokenRight);
-      spin.start();
-      spinnerActive = true;
-    };
-    const stopSpinner = () => {
-      if (!spinnerActive) return;
-      spin.stop();
-      spinnerActive = false;
-    };
-
-    startSpinner();
-    let firstToken = true;
-    let hasText = false;
-    let usageTotal = null;
-    let streamedChars = 0;
-
-    for await (const ev of agent.run(input)) {
-      if (ev.type === 'text') {
-        streamedChars += String(ev.content || '').length;
-        if (!usageTotal) {
-          const est = Math.ceil(streamedChars / 4);
-          tokenRight = `(${est.toLocaleString('en-US')} tokens)`;
-          if (spinnerActive) spin.setRightText(tokenRight);
-        }
-
-        stopSpinner();
-        if (firstToken) {
-          console.log();
-          firstToken = false;
-        }
-        hasText = true;
-        render.streamWrite(ev.content);
-      } else if (ev.type === 'tool_call') {
-        stopSpinner();
-        if (firstToken) firstToken = false;
-        if (hasText) {
-          console.log();
-          hasText = false;
-        }
-        console.log(render.toolCallHeader(ev.name));
-        console.log(render.toolArgs(ev.arguments));
-        startSpinner('running tool');
-      } else if (ev.type === 'confirm') {
-        stopSpinner();
-        const ans = await rl.question('Allow dangerous tool execution? (y/n) > ');
-        agent.confirm(ans.trim().toLowerCase() !== 'n');
-        startSpinner('running tool');
-      } else if (ev.type === 'tool_result') {
-        stopSpinner();
-        console.log(render.toolResult(ev.result));
-        startSpinner();
-      } else if (ev.type === 'usage') {
-        usageTotal = ev.cumulative;
-        tokenRight = `(${Number(usageTotal?.total_tokens || 0).toLocaleString('en-US')} tokens)`;
-        if (spinnerActive) spin.setRightText(tokenRight);
-      } else if (ev.type === 'error') {
-        stopSpinner();
-        if (hasText) {
-          console.log();
-          hasText = false;
-        }
-        console.log(render.errorText(ev.message));
-      }
+    if (autoState.running) {
+      console.log(render.dimText('Auto mode is running. Use /auto stop first if you want manual chat.\n'));
+      continue;
     }
 
-    stopSpinner();
-    process.stderr.write('\r\x1b[K');
-    if (hasText) console.log();
-    if (usageTotal) console.log(render.tokenUsageLine(usageTotal));
+    await executeAgentTurn(agent, input, rl);
     try {
       saveConversation({
         id: currentConversationId,
@@ -159,8 +103,128 @@ export async function runCLI(cfg) {
     console.log();
   }
 
+  if (autoState.running) {
+    autoState.stopRequested = true;
+    try { await autoState.loopPromise; } catch {}
+  }
+
   console.log(render.dimText('Bye.'));
   rl.close();
+}
+
+async function executeAgentTurn(agent, input, rl) {
+  let spin = render.createSpinner();
+  let spinnerActive = false;
+  let tokenRight = '(0 tokens)';
+  const startSpinner = (label) => {
+    spin.stop();
+    spin = render.createSpinner(label);
+    spin.setRightText(tokenRight);
+    spin.start();
+    spinnerActive = true;
+  };
+  const stopSpinner = () => {
+    if (!spinnerActive) return;
+    spin.stop();
+    spinnerActive = false;
+  };
+
+  startSpinner();
+  let firstToken = true;
+  let hasText = false;
+  let usageTotal = null;
+  let streamedChars = 0;
+
+  for await (const ev of agent.run(input)) {
+    if (ev.type === 'text') {
+      streamedChars += String(ev.content || '').length;
+      if (!usageTotal) {
+        const est = Math.ceil(streamedChars / 4);
+        tokenRight = `(${est.toLocaleString('en-US')} tokens)`;
+        if (spinnerActive) spin.setRightText(tokenRight);
+      }
+
+      stopSpinner();
+      if (firstToken) {
+        console.log();
+        firstToken = false;
+      }
+      hasText = true;
+      render.streamWrite(ev.content);
+    } else if (ev.type === 'tool_call') {
+      stopSpinner();
+      if (firstToken) firstToken = false;
+      if (hasText) {
+        console.log();
+        hasText = false;
+      }
+      console.log(render.toolCallHeader(ev.name));
+      console.log(render.toolArgs(ev.arguments));
+      startSpinner('running tool');
+    } else if (ev.type === 'confirm') {
+      stopSpinner();
+      const ans = await rl.question('Allow dangerous tool execution? (y/n) > ');
+      agent.confirm(ans.trim().toLowerCase() !== 'n');
+      startSpinner('running tool');
+    } else if (ev.type === 'tool_result') {
+      stopSpinner();
+      console.log(render.toolResult(ev.result));
+      startSpinner();
+    } else if (ev.type === 'usage') {
+      usageTotal = ev.cumulative;
+      tokenRight = `(${Number(usageTotal?.total_tokens || 0).toLocaleString('en-US')} tokens)`;
+      if (spinnerActive) spin.setRightText(tokenRight);
+    } else if (ev.type === 'error') {
+      stopSpinner();
+      if (hasText) {
+        console.log();
+        hasText = false;
+      }
+      console.log(render.errorText(ev.message));
+    }
+  }
+
+  stopSpinner();
+  process.stderr.write('\r\x1b[K');
+  if (hasText) console.log();
+  if (usageTotal) console.log(render.tokenUsageLine(usageTotal));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startAutoLoop({ autoState, agent, rl, getConversationId }) {
+  autoState.running = true;
+  autoState.stopRequested = false;
+  autoState.round = 0;
+  autoState.loopPromise = (async () => {
+    while (!autoState.stopRequested) {
+      autoState.round += 1;
+      const isFirst = autoState.round === 1;
+      const prompt = isFirst
+        ? `自动任务目标：${autoState.objective}\n现在开始执行第 1 轮，并在每轮结束后汇报简短进展。除非收到停止指令，不要结束任务。`
+        : `继续执行自动任务目标：${autoState.objective}\n当前为第 ${autoState.round} 轮，请继续执行下一轮。`;
+
+      console.log(render.accentText(`\n[auto] round ${autoState.round} start`));
+      await executeAgentTurn(agent, prompt, rl);
+
+      try {
+        saveConversation({
+          id: getConversationId(),
+          messages: agent.getMessages(),
+        });
+      } catch {}
+
+      if (autoState.stopRequested) break;
+      console.log(render.dimText(`[auto] sleep ${autoState.intervalSec}s\n`));
+      await sleep(autoState.intervalSec * 1000);
+    }
+  })().finally(() => {
+    autoState.running = false;
+    autoState.loopPromise = null;
+    console.log(render.dimText('[auto] stopped.\n'));
+  });
 }
 
 async function promptWithSlashHints(rl) {
@@ -231,7 +295,7 @@ async function promptWithSlashHints(rl) {
   });
 }
 
-async function handleCommand(input, cfg, agent, rl, currentConversationId) {
+async function handleCommand(input, cfg, agent, rl, currentConversationId, autoState) {
   const [cmd, ...args] = input.split(/\s+/);
 
   switch (cmd) {
@@ -258,6 +322,9 @@ async function handleCommand(input, cfg, agent, rl, currentConversationId) {
         '/tools             - Browse tools (arrow keys)',
         '/color             - Switch color theme',
         '/history           - Resume previous conversation',
+        '/auto start N task - Start background task loop every N seconds',
+        '/auto stop         - Stop background task loop',
+        '/auto status       - Show background task status',
         '/clear             - Clear conversation',
         '/exit              - Exit',
       ].join('\n') + '\n');
@@ -452,6 +519,60 @@ async function handleCommand(input, cfg, agent, rl, currentConversationId) {
       }
       console.log(render.errorText('Usage: /config [key value]\n'));
       return;
+
+    case '/auto': {
+      const sub = String(args[0] || '').toLowerCase();
+      if (sub === 'status') {
+        if (!autoState.running) {
+          console.log(render.dimText('Auto mode: stopped.\n'));
+          return;
+        }
+        console.log(render.dimText(`Auto mode: running, interval=${autoState.intervalSec}s, round=${autoState.round}`));
+        console.log(render.dimText(`Objective: ${autoState.objective}\n`));
+        return;
+      }
+
+      if (sub === 'stop') {
+        if (!autoState.running) {
+          console.log(render.dimText('Auto mode is not running.\n'));
+          return;
+        }
+        autoState.stopRequested = true;
+        console.log(render.dimText('Stopping auto mode... current round will finish first.\n'));
+        return;
+      }
+
+      if (sub === 'start') {
+        if (autoState.running) {
+          console.log(render.errorText('Auto mode already running. Use /auto stop first.\n'));
+          return;
+        }
+        const interval = Number(args[1]);
+        if (!Number.isFinite(interval) || interval <= 0) {
+          console.log(render.errorText('Usage: /auto start <interval_seconds> <task>\n'));
+          return;
+        }
+        const objective = args.slice(2).join(' ').trim();
+        if (!objective) {
+          console.log(render.errorText('Usage: /auto start <interval_seconds> <task>\n'));
+          return;
+        }
+
+        autoState.intervalSec = Math.min(3600, Math.max(1, Math.trunc(interval)));
+        autoState.objective = objective;
+        startAutoLoop({
+          autoState,
+          agent,
+          rl,
+          getConversationId: () => currentConversationId,
+        });
+        console.log(render.dimText(`Auto mode started: every ${autoState.intervalSec}s\n`));
+        return;
+      }
+
+      console.log(render.errorText('Usage: /auto <start|stop|status>\n'));
+      return;
+    }
 
     case '/model':
       try {
