@@ -113,3 +113,7 @@ python run.py --web
 ## 许可证
 
 当前仓库未显式声明许可证。若需开源发布，建议补充 `LICENSE` 文件。
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
