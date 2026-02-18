@@ -39,10 +39,11 @@ export class Agent {
     this.conv = new Conversation(this.systemPrompt);
     this.maxIterations = Number.isFinite(Number(cfg.max_iterations))
       ? Math.trunc(Number(cfg.max_iterations))
-      : 30;
+      : -1;
     this.permissionMode = cfg.permission_mode || 'maximum';
     this.confirmDangerous = this.permissionMode === 'maximum' ? false : cfg.confirm_dangerous;
     this._onConfirm = null;
+    this._pendingConfirmDecision = null;
     this.usageTotal = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   }
 
@@ -129,7 +130,13 @@ export class Agent {
 
         if (this.confirmDangerous && isDangerous(tc.name)) {
           yield { type: 'confirm', name: tc.name, arguments: tc.arguments, id: tc.id };
-          const approved = await new Promise((resolve) => { this._onConfirm = resolve; });
+          let approved;
+          if (typeof this._pendingConfirmDecision === 'boolean') {
+            approved = this._pendingConfirmDecision;
+            this._pendingConfirmDecision = null;
+          } else {
+            approved = await new Promise((resolve) => { this._onConfirm = resolve; });
+          }
           if (!approved) {
             const result = '[user denied execution]';
             this.conv.addToolResult(tc.id, result);
@@ -159,11 +166,15 @@ export class Agent {
     if (this._onConfirm) {
       this._onConfirm(approved);
       this._onConfirm = null;
+      return;
     }
+    this._pendingConfirmDecision = Boolean(approved);
   }
 
   reset() {
     this.conv.clear();
+    this._onConfirm = null;
+    this._pendingConfirmDecision = null;
     this.usageTotal = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   }
 }

@@ -253,7 +253,7 @@ async function handleCommand(input, cfg, agent, rl, currentConversationId) {
         '/delete            - Delete conversation',
         '/config            - View current config',
         '/config key value  - Update config value',
-        '/config max_iterations -1 - Enable continuous loop mode',
+        '/config max_iterations N - Set iteration cap (-1 means unlimited, default)',
         '/model             - Select model (arrow keys)',
         '/tools             - Browse tools (arrow keys)',
         '/color             - Switch color theme',

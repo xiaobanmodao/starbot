@@ -120,10 +120,10 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 To let StarBot run long monitoring tasks continuously:
 
-1. In CLI, run: `/config max_iterations -1`
-2. Ask the agent to loop with `wait_seconds`, for example:
+1. Ask the agent to loop with `wait_seconds`, for example:
    - "Every 30 seconds, fetch latest market data, analyze trend changes, and keep running until I say stop."
+2. Optional: set a cap with `/config max_iterations N` if you want bounded runs.
 
 Notes:
-- `max_iterations = -1` means no iteration cap.
+- Default is unlimited (`max_iterations = -1`).
 - You can stop the process with `Ctrl + C` in terminal.

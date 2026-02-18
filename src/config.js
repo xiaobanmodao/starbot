@@ -15,7 +15,7 @@ const DEFAULTS = {
   max_tokens: 4096,
   permission_mode: 'maximum',
   system_prompt: null, // built dynamically with env context
-  max_iterations: 30,
+  max_iterations: -1,
   confirm_dangerous: false,
 };
 
