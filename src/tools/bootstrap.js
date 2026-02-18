@@ -11,6 +11,7 @@ export async function loadBuiltInTools() {
   await import('./http_request.js');
   await import('./js_exec.js');
   await import('./wait.js');
+  await import('./daemon_jobs.js');
   await import('./create_tool.js');
 }
 

@@ -1,6 +1,6 @@
 import { Agent } from './agent.js';
 import { loadBuiltInTools, loadCustomTools } from './tools/bootstrap.js';
-import { listJobs, updateJob } from './daemon_store.js';
+import { clearDaemonState, listJobs, saveDaemonState, updateJob } from './daemon_store.js';
 import { loadConversation, saveConversation } from './history/store.js';
 
 function sleep(ms) {
@@ -73,6 +73,11 @@ export async function runDaemon(cfg) {
   const shutdown = () => { stop = true; };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  saveDaemonState({
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+    status: 'running',
+  });
 
   console.log('[daemon] StarBot daemon started.');
   console.log('[daemon] Press Ctrl+C to stop.');
@@ -101,4 +106,5 @@ export async function runDaemon(cfg) {
   }
 
   console.log('[daemon] Stopped.');
+  clearDaemonState();
 }

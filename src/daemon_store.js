@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 
 const STARBOT_DIR = join(homedir(), '.starbot');
 const JOBS_FILE = join(STARBOT_DIR, 'daemon_jobs.json');
+const DAEMON_STATE_FILE = join(STARBOT_DIR, 'daemon_state.json');
 
 function ensureDir() {
   mkdirSync(STARBOT_DIR, { recursive: true });
@@ -131,4 +132,26 @@ export function removeJob(id) {
 export function jobsFilePath() {
   ensureDir();
   return JOBS_FILE;
+}
+
+export function loadDaemonState() {
+  ensureDir();
+  if (!existsSync(DAEMON_STATE_FILE)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(DAEMON_STATE_FILE, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDaemonState(state) {
+  ensureDir();
+  writeFileSync(DAEMON_STATE_FILE, JSON.stringify(state || {}, null, 2), 'utf-8');
+}
+
+export function clearDaemonState() {
+  ensureDir();
+  writeFileSync(DAEMON_STATE_FILE, JSON.stringify({}, null, 2), 'utf-8');
 }

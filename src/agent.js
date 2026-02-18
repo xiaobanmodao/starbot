@@ -29,6 +29,7 @@ tool_creation: allowed_and_persistent
 1) 鐩存帴璋冪敤宸ュ叿瀹屾垚浠诲姟銆?2) 澶嶆潅浠诲姟鍙摼寮忚皟鐢ㄥ涓伐鍏枫€?3) 鎵ц澶辫触鍏堝垎鏋愬啀閲嶈瘯銆?4) 姣忔瀹屾垚鍚庣粰鍑虹畝鐭粨璁恒€?</behavior>
 <long_running>
 For monitoring tasks, keep looping with tools and use wait_seconds between checks until user asks to stop.
+When user asks "keep doing this automatically without me", create unattended jobs with unattended_create_job and ensure daemon is running.
 </long_running>`;
 }
 
