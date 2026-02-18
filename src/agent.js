@@ -1,4 +1,4 @@
-import { platform, homedir, hostname, userInfo } from 'os';
+﻿import { platform, homedir, hostname, userInfo } from 'os';
 import { cwd } from 'process';
 import { Client } from './client.js';
 import { Conversation } from './conversation.js';
@@ -11,8 +11,7 @@ function buildSystemPrompt() {
   const dir = cwd();
   const date = new Date().toLocaleDateString('zh-CN');
 
-  return `你是 StarBot，本地自主执行型 AI 助手。优先中文回复，简洁直接。
-<environment>
+  return `浣犳槸 StarBot锛屾湰鍦拌嚜涓绘墽琛屽瀷 AI 鍔╂墜銆備紭鍏堜腑鏂囧洖澶嶏紝绠€娲佺洿鎺ャ€?<environment>
 os: ${os}
 shell: ${shell}
 user: ${user}
@@ -27,11 +26,10 @@ dangerous_tools: auto_approved
 tool_creation: allowed_and_persistent
 </permissions>
 <behavior>
-1) 直接调用工具完成任务。
-2) 复杂任务可链式调用多个工具。
-3) 执行失败先分析再重试。
-4) 每步完成后给出简短结论。
-</behavior>`;
+1) 鐩存帴璋冪敤宸ュ叿瀹屾垚浠诲姟銆?2) 澶嶆潅浠诲姟鍙摼寮忚皟鐢ㄥ涓伐鍏枫€?3) 鎵ц澶辫触鍏堝垎鏋愬啀閲嶈瘯銆?4) 姣忔瀹屾垚鍚庣粰鍑虹畝鐭粨璁恒€?</behavior>
+<long_running>
+For monitoring tasks, keep looping with tools and use wait_seconds between checks until user asks to stop.
+</long_running>`;
 }
 
 export class Agent {
@@ -39,7 +37,9 @@ export class Agent {
     this.systemPrompt = buildSystemPrompt();
     this.client = new Client(cfg);
     this.conv = new Conversation(this.systemPrompt);
-    this.maxIterations = cfg.max_iterations;
+    this.maxIterations = Number.isFinite(Number(cfg.max_iterations))
+      ? Math.trunc(Number(cfg.max_iterations))
+      : 30;
     this.permissionMode = cfg.permission_mode || 'maximum';
     this.confirmDangerous = this.permissionMode === 'maximum' ? false : cfg.confirm_dangerous;
     this._onConfirm = null;
@@ -61,7 +61,7 @@ export class Agent {
     if (withContinueReminder) {
       merged.push({
         role: 'system',
-        content: '继续历史对话模式：请先阅读并参考以上历史消息，再回答用户当前问题。',
+        content: 'Continue the prior conversation context before answering the latest user request.',
       });
     }
     this.conv = new Conversation();
@@ -72,7 +72,9 @@ export class Agent {
     this.conv.addUser(userInput);
     const tools = getOpenAITools();
 
-    for (let i = 0; i < this.maxIterations; i++) {
+    let i = 0;
+    while (this.maxIterations < 0 || i < this.maxIterations) {
+      i += 1;
       const textParts = [];
       const tcMap = {};
       let requestUsage = null;
@@ -147,7 +149,10 @@ export class Agent {
       }
     }
 
-    yield { type: 'error', message: 'Max iterations reached' };
+    yield {
+      type: 'error',
+      message: 'Max iterations reached. Set /config max_iterations -1 for continuous tasks.',
+    };
   }
 
   confirm(approved) {
@@ -162,3 +167,4 @@ export class Agent {
     this.usageTotal = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   }
 }
+

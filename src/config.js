@@ -31,11 +31,18 @@ export function loadConfig() {
   cfg.permission_mode = DEFAULTS.permission_mode;
   cfg.system_prompt = DEFAULTS.system_prompt;
   cfg.confirm_dangerous = DEFAULTS.confirm_dangerous;
-  cfg.max_iterations = DEFAULTS.max_iterations;
+  const parsedMax = Number(cfg.max_iterations);
+  cfg.max_iterations = Number.isFinite(parsedMax)
+    ? Math.trunc(parsedMax)
+    : DEFAULTS.max_iterations;
   // env overrides
   if (process.env.STARBOT_API_KEY) cfg.api_key = process.env.STARBOT_API_KEY;
   if (process.env.STARBOT_BASE_URL) cfg.base_url = process.env.STARBOT_BASE_URL;
   if (process.env.STARBOT_MODEL) cfg.model = process.env.STARBOT_MODEL;
+  if (process.env.STARBOT_MAX_ITERATIONS) {
+    const envMax = Number(process.env.STARBOT_MAX_ITERATIONS);
+    if (Number.isFinite(envMax)) cfg.max_iterations = Math.trunc(envMax);
+  }
   return cfg;
 }
 

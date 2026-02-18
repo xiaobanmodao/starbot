@@ -10,6 +10,7 @@ export async function loadBuiltInTools() {
   await import('./sqlite_query.js');
   await import('./http_request.js');
   await import('./js_exec.js');
+  await import('./wait.js');
   await import('./create_tool.js');
 }
 
