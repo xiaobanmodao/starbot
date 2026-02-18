@@ -110,9 +110,7 @@ python run.py --web
 - **不要将 API Key 写入仓库。**
 - 本仓库已通过 `.gitignore` 忽略 `config.yaml` 与本地数据目录，防止密钥误提交。
 
-## 许可证
 
-当前仓库未显式声明许可证。若需开源发布，建议补充 `LICENSE` 文件。
 
 ## License
 
