@@ -4,6 +4,7 @@ import { addResult } from '../store/results.js';
 import { clearDaemonState, setDaemonRunning } from '../store/daemon_state.js';
 import { listTasks, updateTask } from '../store/tasks.js';
 import { notifySystem } from '../notifier/system.js';
+import { runAIDecision, shouldTriggerAIDecision } from '../ai/decision.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,7 +28,7 @@ function ended(task) {
   return nowMs() >= end;
 }
 
-export async function runTaskCycle(task) {
+export async function runTaskCycle(task, cfg = null) {
   if (ended(task)) {
     updateTask(task.id, {
       status: 'completed',
@@ -57,12 +58,14 @@ export async function runTaskCycle(task) {
   }
 
   const act = runAction(task.action);
+  const nextErrorStreak = act.success ? 0 : Number(task.error_streak || 0) + 1;
   const status = act.success ? 'ok' : 'error';
   const event = act.success ? 'file_detected_and_deleted' : 'file_detected_but_action_failed';
   updateTask(task.id, {
     last_run_at: act.timestamp,
     last_status: status,
     last_error: act.error || '',
+    error_streak: nextErrorStreak,
   });
   addResult({
     task_id: task.task_id,
@@ -78,9 +81,46 @@ export async function runTaskCycle(task) {
   if (task.notify) {
     notifySystem(`${task.task_id}: ${event}`);
   }
+
+  const structuredEvent = {
+    task_type: 'generic_background_task',
+    event_type: act.success ? 'normal_action_result' : 'ambiguous_condition',
+    task_id: task.task_id,
+    timestamp: act.timestamp,
+    context: {
+      watcher: watch,
+      action: act,
+      error_streak: nextErrorStreak,
+      metrics_conflict: false,
+      unknown_pattern: !act.success && /unknown|denied|busy|lock/i.test(String(act.error || '')),
+      environment: process.env.NODE_ENV || 'prod',
+    },
+    decision_required: task?.ai_think_when?.decision_required || 'classify',
+  };
+
+  if (!shouldTriggerAIDecision(task.ai_think_when, structuredEvent)) return;
+
+  const decision = await runAIDecision(cfg || {}, structuredEvent);
+  updateTask(task.id, { ai_last_decision: decision });
+  addResult({
+    task_id: task.task_id,
+    origin_conversation_id: task.origin_conversation_id,
+    event: 'ai_decision_generated',
+    status: 'ok',
+    details: decision,
+  });
+
+  const rec = String(decision?.analysis?.recommended_action || '').toLowerCase();
+  if (rec === 'ignore') {
+    updateTask(task.id, { enabled: false, status: 'completed' });
+  } else if (rec === 'wait') {
+    updateTask(task.id, { last_status: 'idle' });
+  } else if (rec === 'escalate' && task.notify) {
+    notifySystem(`${task.task_id}: ai_escalate`);
+  }
 }
 
-export async function runAutomationDaemon() {
+export async function runAutomationDaemon(cfg = null) {
   setDaemonRunning(process.pid);
   let stop = false;
   const running = new Set();
@@ -96,7 +136,7 @@ export async function runAutomationDaemon() {
       if (running.has(task.id)) continue;
       if (!due(task)) continue;
       running.add(task.id);
-      runTaskCycle(task)
+      runTaskCycle(task, cfg)
         .catch((e) => {
           updateTask(task.id, {
             last_run_at: new Date().toISOString(),

@@ -175,6 +175,48 @@ node src/index.js --job-remove <任务ID>
 - 用户可见汇报仅在原始对话激活时统一输出，随后标记为 `reported=true`
 - 后台线程不会直接向用户发对话消息，也不会创建临时对话
 
+## AI 触发模型（程序优先）
+
+- 默认：后台任务不调用 AI（纯 watcher/action/rule）
+- 仅当规则不足或条件冲突时触发 AI 一次分析
+- AI 只做结构化决策，不参与轮询和执行
+- 即使 AI 离线，系统也会继续运行（保守降级）
+
+### 触发条件（已实现为规则）
+
+- `action_error_repeated`：动作连续失败达到阈值
+- `unknown_pattern`：出现未知异常模式
+- `multiple_metrics_conflict`：多指标冲突（预留）
+
+### AI 输入（统一结构）
+
+```json
+{
+  "task_type": "generic_background_task",
+  "event_type": "ambiguous_condition",
+  "task_id": "xxx",
+  "timestamp": "ISO8601",
+  "context": {},
+  "decision_required": "classify | choose | explain | prioritize"
+}
+```
+
+### AI 输出（统一结构）
+
+```json
+{
+  "task_id": "xxx",
+  "event_type": "ambiguous_condition",
+  "analysis": {
+    "classification": "type_a | type_b | unknown",
+    "confidence": 0.72,
+    "uncertainty_level": "low | medium | high",
+    "recommended_action": "proceed | wait | escalate | ignore",
+    "reason_codes": ["metric_conflict", "pattern_match_partial"]
+  }
+}
+```
+
 ## 指定测试任务（133456.txt）
 
 1. 在任意对话中告诉 AI：  

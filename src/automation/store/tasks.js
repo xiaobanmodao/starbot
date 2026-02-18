@@ -36,6 +36,7 @@ export function createFileDeleteTask({
   interval_sec = 1,
   end_at = null,
   notify = true,
+  ai_think_when = null,
 }) {
   const origin = String(origin_conversation_id || '').trim();
   const taskName = String(task_id || '').trim();
@@ -58,6 +59,16 @@ export function createFileDeleteTask({
     interval_sec: interval,
     end_at: end_at ? String(end_at) : null,
     notify: Boolean(notify),
+    ai_think_when: ai_think_when && typeof ai_think_when === 'object'
+      ? ai_think_when
+      : {
+          enabled: false,
+          condition: 'none',
+          decision_required: 'none',
+          prompt_id: 'generic_ai_decision_prompt_v1',
+        },
+    ai_last_decision: null,
+    error_streak: 0,
     status: 'running',
     enabled: true,
     last_run_at: null,
@@ -88,6 +99,18 @@ export function updateTask(id, patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, 'last_status')) next.last_status = String(patch.last_status || '');
   if (Object.prototype.hasOwnProperty.call(patch, 'last_error')) next.last_error = String(patch.last_error || '');
   if (Object.prototype.hasOwnProperty.call(patch, 'notify')) next.notify = Boolean(patch.notify);
+  if (Object.prototype.hasOwnProperty.call(patch, 'ai_think_when')) {
+    next.ai_think_when = patch.ai_think_when && typeof patch.ai_think_when === 'object'
+      ? patch.ai_think_when
+      : next.ai_think_when;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'ai_last_decision')) {
+    next.ai_last_decision = patch.ai_last_decision ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'error_streak')) {
+    const n = Number(patch.error_streak);
+    next.error_streak = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'interval_sec')) {
     const n = normalizeInterval(patch.interval_sec);
     if (!n) throw new Error('interval_sec must be a positive integer');

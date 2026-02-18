@@ -219,7 +219,7 @@ async function main() {
     return;
   }
   if (mode === 'daemon') {
-    await runDaemon();
+    await runDaemon(cfg);
     return;
   }
   await runCLI(cfg);

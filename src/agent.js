@@ -30,6 +30,7 @@ tool_creation: allowed_and_persistent
 <long_running>
 For monitoring tasks, keep looping with tools and use wait_seconds between checks until user asks to stop.
 When user asks "keep doing this automatically without me", create unattended jobs with unattended_watch_delete_file and ensure daemon is running.
+Default to pure programmatic automation; enable AI exception analysis only when rules are insufficient or conditions conflict.
 </long_running>`;
 }
 
