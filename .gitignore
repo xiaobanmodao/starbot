@@ -1,0 +1,11 @@
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+nul
+
+# Local secrets and runtime data
+config.yaml
+
+# Local chat data
+.starbot/
