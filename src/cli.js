@@ -16,6 +16,7 @@ import {
   saveConversation,
   clearConversation,
 } from './history/store.js';
+import { listPendingResults, markResultsReported } from './result_store.js';
 
 const COMMAND_HINTS = [
   { cmd: '/help', desc: 'show commands' },
@@ -65,6 +66,7 @@ export async function runCLI(cfg) {
       break;
     }
     if (!input) continue;
+    await flushPendingResults(currentConversationId);
 
     if (input.startsWith('/')) {
       const cmdName = input.split(/\s+/)[0].toLowerCase();
@@ -92,7 +94,7 @@ export async function runCLI(cfg) {
       console.log(render.dimText('Auto mode is running. Use /auto stop first if you want manual chat.\n'));
       continue;
     }
-
+    agent.setOriginConversationId(currentConversationId);
     await executeAgentTurn(agent, input, rl);
     try {
       saveConversation({
@@ -110,6 +112,21 @@ export async function runCLI(cfg) {
 
   console.log(render.dimText('Bye.'));
   rl.close();
+}
+
+async function flushPendingResults(conversationId) {
+  const pending = listPendingResults(conversationId);
+  if (!pending.length) return;
+  const lines = pending.map((item, idx) => {
+    const title = item.summary || `任务结果 ${idx + 1}`;
+    const when = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+    const job = item.job_id ? `job=${item.job_id}` : '';
+    return `${idx + 1}. ${title}${when ? ` (${when})` : ''}${job ? ` [${job}]` : ''}`;
+  });
+  console.log(render.accentText('\n后台任务更新：'));
+  console.log(lines.join('\n'));
+  console.log();
+  markResultsReported(pending.map((item) => item.id));
 }
 
 async function executeAgentTurn(agent, input, rl) {
@@ -207,6 +224,7 @@ function startAutoLoop({ autoState, agent, rl, getConversationId }) {
         : `继续执行自动任务目标：${autoState.objective}\n当前为第 ${autoState.round} 轮，请继续执行下一轮。`;
 
       console.log(render.accentText(`\n[auto] round ${autoState.round} start`));
+      agent.setOriginConversationId(getConversationId());
       await executeAgentTurn(agent, prompt, rl);
 
       try {

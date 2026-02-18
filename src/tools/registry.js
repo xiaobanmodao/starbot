@@ -15,10 +15,10 @@ export function getOpenAITools() {
   }));
 }
 
-export async function callTool(name, argsStr) {
+export async function callTool(name, argsStr, context = {}) {
   if (!_tools[name]) return JSON.stringify({ error: `Unknown tool: ${name}` });
   const args = typeof argsStr === 'string' ? JSON.parse(argsStr) : argsStr;
-  const result = await _tools[name].fn(args);
+  const result = await _tools[name].fn(args, context || {});
   return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
 }
 

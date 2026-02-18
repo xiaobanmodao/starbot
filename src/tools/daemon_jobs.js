@@ -50,11 +50,28 @@ tool('unattended_create_job', 'Create a persistent unattended background job. Us
     name: { type: 'string', description: 'Short job name' },
     objective: { type: 'string', description: 'Detailed long-running objective' },
     interval_sec: { type: 'number', description: 'Run interval in seconds (default 60)' },
+    system_notify: { type: 'boolean', description: 'Trigger OS notification when a run completes (default false)' },
     auto_start_daemon: { type: 'boolean', description: 'Auto start daemon if not running (default true)' },
   },
   required: ['name', 'objective'],
-}, true, async ({ name, objective, interval_sec = 60, auto_start_daemon = true }) => {
-  const job = createJob({ name, objective, interval_sec, enabled: true });
+}, true, async ({ name, objective, interval_sec = 60, system_notify = false, auto_start_daemon = true }, context = {}) => {
+  const originConversationId = String(context?.origin_conversation_id || '').trim();
+  if (!originConversationId) {
+    return JSON.stringify({
+      ok: false,
+      error: 'origin_conversation_id missing; this tool must be called from an active conversation.',
+    }, null, 2);
+  }
+  const job = createJob({
+    name,
+    objective,
+    interval_sec,
+    origin_conversation_id: originConversationId,
+    enabled: true,
+  });
+  if (system_notify) {
+    updateJob(job.id, { system_notify: true });
+  }
   let status = daemonStatus();
   if (auto_start_daemon !== false) status = startDaemonIfNeeded();
   return JSON.stringify({
@@ -80,14 +97,16 @@ tool('unattended_update_job', 'Update unattended job fields like enabled status,
     id: { type: 'string', description: 'Job id' },
     enabled: { type: 'boolean', description: 'Enable/disable job' },
     interval_sec: { type: 'number', description: 'Interval in seconds' },
+    system_notify: { type: 'boolean', description: 'Enable/disable OS notification' },
     objective: { type: 'string', description: 'New objective text' },
     name: { type: 'string', description: 'New name' },
   },
   required: ['id'],
-}, true, async ({ id, enabled, interval_sec, objective, name }) => {
+}, true, async ({ id, enabled, interval_sec, system_notify, objective, name }) => {
   const patch = {};
   if (typeof enabled === 'boolean') patch.enabled = enabled;
   if (interval_sec !== undefined) patch.interval_sec = interval_sec;
+  if (typeof system_notify === 'boolean') patch.system_notify = system_notify;
   if (objective !== undefined) patch.objective = objective;
   if (name !== undefined) patch.name = name;
   const updated = updateJob(id, patch);

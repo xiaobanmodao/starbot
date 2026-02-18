@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
 
 const STARBOT_DIR = join(homedir(), '.starbot');
 const JOBS_FILE = join(STARBOT_DIR, 'daemon_jobs.json');
@@ -47,12 +46,14 @@ export function listJobs() {
   return readDb().jobs;
 }
 
-export function createJob({ name, objective, interval_sec, enabled = true }) {
+export function createJob({ name, objective, interval_sec, origin_conversation_id, enabled = true }) {
   const nextName = normalizeText(name, 120);
   const nextObjective = normalizeText(objective, 5000);
+  const nextOrigin = normalizeText(origin_conversation_id, 200);
   const nextInterval = normalizeInterval(interval_sec);
   if (!nextName) throw new Error('name is required');
   if (!nextObjective) throw new Error('objective is required');
+  if (!nextOrigin) throw new Error('origin_conversation_id is required');
   if (!nextInterval) throw new Error('interval_sec must be a positive integer');
 
   const db = readDb();
@@ -61,9 +62,10 @@ export function createJob({ name, objective, interval_sec, enabled = true }) {
     id: randomUUID(),
     name: nextName,
     objective: nextObjective,
+    origin_conversation_id: nextOrigin,
     interval_sec: nextInterval,
     enabled: Boolean(enabled),
-    conversation_id: randomUUID(),
+    system_notify: false,
     last_run_at: null,
     last_status: 'idle',
     last_error: '',
@@ -101,6 +103,9 @@ export function updateJob(id, patch = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'enabled')) {
     next.enabled = Boolean(patch.enabled);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'system_notify')) {
+    next.system_notify = Boolean(patch.system_notify);
   }
   if (Object.prototype.hasOwnProperty.call(patch, 'last_run_at')) {
     next.last_run_at = patch.last_run_at ? String(patch.last_run_at) : null;

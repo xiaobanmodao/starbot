@@ -56,11 +56,18 @@ function handleJobCommands() {
     const name = getArg('--name');
     const objective = getArg('--objective');
     const interval = getArg('--interval');
-    if (!name || !objective || !interval) {
-      console.log('Usage: --job-add --name "<name>" --interval <seconds> --objective "<task>"');
+    const origin = getArg('--origin');
+    if (!name || !objective || !interval || !origin) {
+      console.log('Usage: --job-add --name "<name>" --interval <seconds> --origin <conversation_id> --objective "<task>"');
       return true;
     }
-    const job = createJob({ name, objective, interval_sec: interval, enabled: true });
+    const job = createJob({
+      name,
+      objective,
+      interval_sec: interval,
+      origin_conversation_id: origin,
+      enabled: true,
+    });
     console.log(`Job created: ${job.id}`);
     return true;
   }
@@ -204,7 +211,7 @@ async function main() {
     return;
   }
   if (mode === 'daemon') {
-    await runDaemon(cfg);
+    await runDaemon();
     return;
   }
   await runCLI(cfg);

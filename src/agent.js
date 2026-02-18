@@ -45,6 +45,7 @@ export class Agent {
     this.confirmDangerous = this.permissionMode === 'maximum' ? false : cfg.confirm_dangerous;
     this._onConfirm = null;
     this._pendingConfirmDecision = null;
+    this.originConversationId = null;
     this.usageTotal = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   }
 
@@ -148,7 +149,9 @@ export class Agent {
 
         let result;
         try {
-          result = await callTool(tc.name, tc.arguments);
+          result = await callTool(tc.name, tc.arguments, {
+            origin_conversation_id: this.originConversationId,
+          });
         } catch (e) {
           result = `[error] ${e.message}`;
         }
@@ -170,6 +173,10 @@ export class Agent {
       return;
     }
     this._pendingConfirmDecision = Boolean(approved);
+  }
+
+  setOriginConversationId(id) {
+    this.originConversationId = id ? String(id) : null;
   }
 
   reset() {

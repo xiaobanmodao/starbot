@@ -131,6 +131,7 @@ StarBot 默认开启持续工作能力（`max_iterations = -1`），并支持后
 - “从现在开始每 30 秒看盘并分析，除非我说停止，否则一直做。”
 
 在该模式下，AI 会自动调用无人值守工具创建后台任务并拉起守护进程，无需你手动输入管理命令。
+后台 Runner 不会直接回复用户；只写结构化结果，等待你下次在原对话输入时统一汇报。
 
 ## 守护进程任务管理（无人值守）
 
@@ -139,7 +140,7 @@ StarBot 默认开启持续工作能力（`max_iterations = -1`），并支持后
 ### 添加任务
 
 ```bash
-node src/index.js --job-add --name "看盘任务" --interval 30 --objective "每30秒抓取行情并分析趋势，发现异常立即提示"
+node src/index.js --job-add --name "看盘任务" --interval 30 --origin <conversation_id> --objective "每30秒抓取行情并分析趋势，发现异常立即提示"
 ```
 
 ### 查看任务
@@ -162,6 +163,15 @@ node src/index.js --job-remove <任务ID>
 ```
 
 任务文件路径：`~/.starbot/daemon_jobs.json`
+结果文件路径：`~/.starbot/daemon_results.json`
+
+### OpenClaw 风格约束（当前实现）
+
+- 后台 Runner 不持有对话上下文，不调用任何对话/LLM 接口
+- 后台只写结构化结果（`reported=false`），并更新任务状态
+- 任务完成后状态为 `completed`（失败为 `error`）
+- 用户可见汇报仅在原始对话激活时统一输出，随后标记为 `reported=true`
+- 后台线程不会直接向用户发对话消息，也不会创建临时对话
 
 ## 安全说明
 

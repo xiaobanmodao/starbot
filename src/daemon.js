@@ -1,7 +1,6 @@
-import { Agent } from './agent.js';
-import { loadBuiltInTools, loadCustomTools } from './tools/bootstrap.js';
+import { spawn } from 'child_process';
 import { clearDaemonState, listJobs, saveDaemonState, updateJob } from './daemon_store.js';
-import { loadConversation, saveConversation } from './history/store.js';
+import { addResult } from './result_store.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,56 +17,63 @@ function nextDueAt(job) {
   return last + interval;
 }
 
-async function runJob(cfg, job, agents) {
-  let agent = agents.get(job.id);
-  if (!agent) {
-    agent = new Agent(cfg);
-    const record = loadConversation(job.conversation_id);
-    if (record?.messages?.length) agent.loadMessages(record.messages, true);
-    agents.set(job.id, agent);
-  }
-
-  const round = `自动任务：${job.name}\n目标：${job.objective}\n请继续执行下一轮并汇报关键结果。`;
-  let gotError = '';
-  let textOut = '';
-
-  console.log(`[daemon] run job=${job.id} name=${job.name}`);
-  for await (const ev of agent.run(round)) {
-    if (ev.type === 'text') textOut += String(ev.content || '');
-    if (ev.type === 'error') gotError = String(ev.message || 'unknown error');
-    if (ev.type === 'confirm') {
-      // Daemon mode runs unattended: dangerous actions are auto-approved.
-      agent.confirm(true);
-    }
-  }
-
-  try {
-    saveConversation({
-      id: job.conversation_id,
-      title: `[daemon] ${job.name}`,
-      messages: agent.getMessages(),
+function notifySystem(message) {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (process.platform === 'win32') {
+    const esc = text.replace(/'/g, "''");
+    const script = `[reflection.assembly]::loadwithpartialname('System.Windows.Forms') | Out-Null; [System.Windows.Forms.MessageBox]::Show('${esc}','StarBot Daemon') | Out-Null`;
+    const child = spawn('powershell.exe', ['-NoProfile', '-Command', script], {
+      detached: true,
+      stdio: 'ignore',
     });
-  } catch {}
-
-  updateJob(job.id, {
-    last_run_at: new Date().toISOString(),
-    last_status: gotError ? 'error' : 'ok',
-    last_error: gotError || '',
-  });
-
-  if (gotError) {
-    console.log(`[daemon] job=${job.id} status=error msg=${gotError}`);
-  } else {
-    const preview = textOut.replace(/\s+/g, ' ').trim().slice(0, 160);
-    console.log(`[daemon] job=${job.id} status=ok output=${preview}`);
+    child.unref();
   }
 }
 
-export async function runDaemon(cfg) {
-  await loadBuiltInTools();
-  await loadCustomTools();
+async function runJob(job) {
+  if (!job.origin_conversation_id) {
+    updateJob(job.id, {
+      last_run_at: new Date().toISOString(),
+      last_status: 'error',
+      last_error: 'missing origin_conversation_id; recreate this job from an active conversation',
+    });
+    return;
+  }
 
-  const agents = new Map();
+  // Runner spec: deterministic and non-LLM.
+  // type=heartbeat creates a structured status result only.
+  const startedAt = new Date().toISOString();
+  const summary = `任务 ${job.name} 执行完成`;
+  const payload = {
+    job_id: job.id,
+    name: job.name,
+    objective: job.objective,
+    runner_type: 'heartbeat',
+    started_at: startedAt,
+    completed_at: new Date().toISOString(),
+  };
+
+  addResult({
+    origin_conversation_id: job.origin_conversation_id,
+    job_id: job.id,
+    summary,
+    payload,
+    status: 'completed',
+  });
+
+  updateJob(job.id, {
+    last_run_at: payload.completed_at,
+    last_status: 'completed',
+    last_error: '',
+  });
+
+  if (job.system_notify) {
+    notifySystem(`${job.name}: ${summary}`);
+  }
+}
+
+export async function runDaemon() {
   const running = new Set();
   let stop = false;
   const shutdown = () => { stop = true; };
@@ -80,7 +86,7 @@ export async function runDaemon(cfg) {
   });
 
   console.log('[daemon] StarBot daemon started.');
-  console.log('[daemon] Press Ctrl+C to stop.');
+  console.log('[daemon] Runner policy: no conversation, no LLM, structured results only.');
 
   while (!stop) {
     const jobs = listJobs().filter((job) => job.enabled);
@@ -91,7 +97,7 @@ export async function runDaemon(cfg) {
       if (now < nextDueAt(job)) continue;
 
       running.add(job.id);
-      runJob(cfg, job, agents)
+      runJob(job)
         .catch((e) => {
           updateJob(job.id, {
             last_run_at: new Date().toISOString(),
@@ -105,6 +111,6 @@ export async function runDaemon(cfg) {
     await sleep(1000);
   }
 
-  console.log('[daemon] Stopped.');
   clearDaemonState();
+  console.log('[daemon] Stopped.');
 }

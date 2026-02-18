@@ -17,6 +17,7 @@ import {
   renameConversation,
   saveConversation,
 } from '../history/store.js';
+import { listPendingResults, markResultsReported } from '../result_store.js';
 
 const WEB_DIR = join(process.cwd(), 'src', 'web');
 const sessions = new Map();
@@ -211,12 +212,28 @@ export async function runWeb(cfg, options = {}) {
         if (!message) return writeJson(res, 400, { error: 'message is required' });
 
         const { agent } = getOrCreateSession(sessionId, cfg);
+        agent.setOriginConversationId(sessionId);
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
           Connection: 'keep-alive',
         });
         writeSse(res, 'session', { sessionId });
+
+        const pending = listPendingResults(sessionId);
+        if (pending.length) {
+          const summary = [
+            '后台任务更新：',
+            ...pending.map((item, idx) => {
+              const ts = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+              const job = item.job_id ? ` [job:${item.job_id}]` : '';
+              return `${idx + 1}. ${item.summary || '任务完成'}${ts ? ` (${ts})` : ''}${job}`;
+            }),
+          ].join('\n');
+          writeSse(res, 'answer_start', {});
+          writeSse(res, 'answer', { chunk: `${summary}\n\n` });
+          markResultsReported(pending.map((item) => item.id));
+        }
 
         let sawTool = false;
         let hadToolResult = false;
