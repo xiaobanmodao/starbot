@@ -1,11 +1,11 @@
 ﻿# StarBot
 
-StarBot 是一个可在本地运行的 AI 智能代理，支持命令行和网页两种使用方式。
+StarBot 是一个可在本地运行的 AI 智能代理，支持命令行、网页和守护进程三种使用方式。
 它可以通过工具调用完成系统命令执行、文件读写、网页检索、HTTP 接口请求、SQLite 查询，并支持动态创建自定义工具。
 
 ## 项目特点
 
-- 支持双模式运行：命令行模式、网页模式
+- 支持三种运行模式：命令行模式、网页模式、守护进程模式
 - 支持流式输出回答
 - 内置完整工具体系（系统命令、PowerShell、Python、文件、网络、数据库）
 - 支持会话历史本地保存与恢复
@@ -81,6 +81,12 @@ npm start
 node src/index.js --web
 ```
 
+### 启动 Node 守护进程模式（常驻自动执行任务）
+
+```bash
+npm run daemon
+```
+
 ### 启动 Python 命令行模式
 
 ```bash
@@ -119,6 +125,37 @@ StarBot 默认开启持续工作能力（`max_iterations = -1`），并支持后
 3. 停止任务：`/auto stop`
 4. 如果需要限制单轮内部推理轮次，可设置：`/config max_iterations N`
 5. 在命令行中也可通过 `Ctrl + C` 终止程序
+
+## 守护进程任务管理（无人值守）
+
+你可以把任务保存到本地任务库，随后用守护进程常驻执行，不需要持续保持聊天窗口输入。
+
+### 添加任务
+
+```bash
+node src/index.js --job-add --name "看盘任务" --interval 30 --objective "每30秒抓取行情并分析趋势，发现异常立即提示"
+```
+
+### 查看任务
+
+```bash
+npm run job:list
+```
+
+### 启用/禁用任务
+
+```bash
+node src/index.js --job-enable <任务ID>
+node src/index.js --job-disable <任务ID>
+```
+
+### 删除任务
+
+```bash
+node src/index.js --job-remove <任务ID>
+```
+
+任务文件路径：`~/.starbot/daemon_jobs.json`
 
 ## 安全说明
 
