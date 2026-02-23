@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local runtime state
+.env
+logs/
+starbot_memory.db
+starbot_memory.db-shm
+starbot_memory.db-wal
+starbot_state.json
+
+# uv / pyenv
+.python-version
+uv.lock
+
+# OS / editor junk
+nul
+~/
+*.exe

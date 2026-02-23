@@ -1,0 +1,40 @@
+[project]
+name = "starbot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic[vertex]>=0.82.0",
+    "apscheduler>=3.11.2",
+    "discord-py>=2.6.4",
+    "openai>=2.21.0",
+    "pillow>=12.1.1",
+    "prompt-toolkit>=3.0.0",
+    "psutil>=7.2.2",
+    "pyautogui>=0.9.54",
+    "pyperclip>=1.9.0",
+    "pydantic-ai>=1.62.0",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
+    "yt-dlp>=2024.0.0",
+    "pytesseract>=0.3.10",
+    "trafilatura>=1.6.0",
+    "qrcode[pil]>=8.2",
+    "playwright>=1.58.0",
+    "faster-whisper>=1.2.1",
+]
+
+[project.scripts]
+starbot = "start:main"
+
+[tool.setuptools]
+py-modules = ["start", "config", "main"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "comms*", "memory*", "actions*", "skills*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
