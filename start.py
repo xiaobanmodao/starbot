@@ -104,6 +104,26 @@ def _pip_install(packages: list[str]) -> bool:
     return True
 
 
+def _ensure_bootstrap_deps_for_config() -> bool:
+    """
+    Ensure minimal dependencies needed to import config/setup before full checks.
+
+    `config.py` imports `python-dotenv` at module import time, so setup-related CLI
+    modes need it available before we can even enter the configuration wizard.
+    """
+    if _can_import("dotenv"):
+        return True
+
+    print("  Missing bootstrap dependency: python-dotenv")
+    print("  Installing python-dotenv so the configuration wizard can start...")
+    ok = _pip_install(["python-dotenv>=1.2.1"])
+    if ok:
+        print("  OK  python-dotenv installed\n")
+    else:
+        print("  ERROR Failed to install python-dotenv; cannot start configuration wizard.\n")
+    return ok
+
+
 def install_core_deps() -> bool:
     """[1/5] Check and install core Python dependencies."""
     print("[1/5] Core Python dependencies")
@@ -363,6 +383,10 @@ def main():
 
     print(f"  {blue}>>{white} Startup checks{reset}\n")
 
+    if not _ensure_bootstrap_deps_for_config():
+        input("\nPress Enter to exit...")
+        sys.exit(1)
+
     from config import setup
 
     if cli["setup_only"]:
@@ -400,4 +424,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
