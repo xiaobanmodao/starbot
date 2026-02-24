@@ -540,7 +540,9 @@ def run_setup_wizard(*, force: bool = False):
         if force:
             intro = (
                 "Starbot configuration wizard (reconfigure mode).\n\n"
-                "Already configured steps can be skipped or modified.\n\n" + intro
+                "Already configured steps can be skipped or modified.\n"
+                "Skip / Modify appears only when all required fields in that step are already set.\n\n"
+                + intro
             )
         else:
             intro = "Incomplete configuration detected.\n\n" + intro
