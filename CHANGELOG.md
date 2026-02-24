@@ -14,6 +14,7 @@ Format:
 - `/skill info <name>` to inspect skill details (kind, source, path, tools, keywords)
 - `/skill update <name>` for managed external skills (updates from recorded source)
 - External skill keyword indexing and auto recommendations for better tool routing
+- `tools/changelog_release.py` helper to archive `Unreleased` into a versioned changelog section
 
 ### Changed
 - `Brain` now injects a `[Skill Recommendations]` hint on the first user message
