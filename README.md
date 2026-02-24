@@ -170,13 +170,17 @@ cp .env.template .env
 # 启动（自动检查依赖）
 uv run python start.py
 ```
+> 📌 配置向导与外部 Skills 生态更新（包含重跑配置向导、`skillsmp.com` 支持）：见文末“近期更新（配置向导 / 外部 Skills 生态）”章节。
+
 
 ### 方法二：使用 pip
 
 ```bash
+
 pip install -r requirements.txt
 python start.py
 ```
+
 
 ### 方法三：双击启动
 
@@ -187,6 +191,8 @@ python start.py
 ## ⚙️ 配置说明
 
 复制 `.env.template` 为 `.env` 并填写以下配置：
+
+> 📌 如果你已经配置过，也可以后续通过命令行重新打开配置向导（支持按步骤跳过或修改）：见文末“近期更新（配置向导 / 外部 Skills 生态）”章节。
 
 ```env
 # ── 主 LLM 配置 ──────────────────────────────────────
@@ -499,3 +505,70 @@ elif name == "my_tool":
 ## 📄 许可证
 
 本项目基于 [MIT License](LICENSE) 开源，可自由使用、修改和分发。
+
+---
+
+## 🆕 近期更新（配置向导 / 外部 Skills 生态）
+
+### 1) 配置向导已独立拆分（功能不变）
+
+- 启动时若 `.env` 关键配置缺失，仍会自动进入配置向导（行为保持不变）
+- 配置向导已拆分为独立模块，便于维护和后续扩展
+- 现在支持“重新运行配置向导”来修改已有配置
+
+### 2) 已配置项支持“跳过 / 修改”
+
+在重新配置模式下，向导会按步骤提示（LLM / Discord / Proxy）：
+
+- `Skip`：保留当前配置不变
+- `Modify`：进入该步骤修改配置
+
+已配置字段会显示当前值（敏感值会脱敏），方便微调而不是重填全部内容。
+
+### 3) 命令行手动重跑配置向导（新增）
+
+以下命令可在命令行中重新进入配置向导：
+
+```bash
+# 只运行配置向导，不启动 Starbot
+python start.py setup
+python start.py config
+python start.py --setup-only
+
+# 先运行配置向导，再继续正常启动
+python start.py --setup
+
+# 直接运行独立配置向导模块
+python config_wizard.py
+```
+
+### 4) 支持外部下载的 Skills（兼容 SKILL.md 生态）
+
+Starbot 现在支持兼容外部 `SKILL.md` 技能生态（例如部分 Codex / Claude 风格技能包），并自动将其暴露为可调用工具。
+
+支持来源包括：
+
+- `skillsmp.com` 页面链接（自动解析页面中的 GitHub 仓库）
+- GitHub 仓库 / `tree` 子目录链接（自动查找 `SKILL.md`）
+- 本地目录（包含 `SKILL.md`）
+- 本地或远程 `.zip`（包含 `SKILL.md`）
+- 单文件 `SKILL.md`
+
+安装示例：
+
+```bash
+/skill install https://skillsmp.com/skills/<slug>
+/skill install https://github.com/<owner>/<repo>
+/skill install https://github.com/<owner>/<repo>/tree/main/path/to/skill
+/skill install C:\path\to\some-skill-folder
+```
+
+### 5) AI 会自动使用这些外部 Skills
+
+外部 `SKILL.md` 技能在加载后会自动变成可调用工具（tool schema），因此模型可以像使用内置工具一样自动选择和调用这些技能，无需手工逐条执行说明。
+
+说明：
+
+- 外部“发现型”技能（例如自动扫描到的 `~/.codex/skills`）默认只读加载
+- `/skill remove` 不会删除用户原始目录（会提示你去原位置删除）
+- 安装后如需刷新技能列表，可执行 `/skill reload`

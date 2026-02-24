@@ -4,6 +4,8 @@ import time
 import asyncio
 import json
 import logging
+import shutil
+import importlib.util
 import psutil
 from pathlib import Path
 from datetime import datetime
@@ -22,6 +24,7 @@ from core.adapter import UniversalLLM
 from core.brain import Brain
 from memory.store import MemoryStore
 from core.op_log import undo_last
+from comms.text_safety import is_numeric_spam_text, should_preserve_stream_text_on_tool_switch
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -91,6 +94,7 @@ class StarBotClient(discord.Client):
             embed = discord.Embed(title="📖 Starbot 命令", color=0x3498db)
             embed.add_field(name="对话", value="直接在频道发消息即可", inline=False)
             embed.add_field(name="/status", value="查看系统状态和后台任务", inline=False)
+            embed.add_field(name="/doctor", value="检查配置、推荐安装项和功能可用性", inline=False)
             embed.add_field(name="/stop", value="停止当前任务", inline=False)
             embed.add_field(name="/screenshot", value="截取当前屏幕", inline=False)
             embed.add_field(name="/model [名称]", value="查看/切换模型", inline=False)
@@ -120,6 +124,15 @@ class StarBotClient(discord.Client):
             embed.add_field(name="后台任务", value=_task_mgr.summary(), inline=False)
             embed.set_footer(text=self._footer(t0))
             await interaction.followup.send(embed=embed)
+
+        # ── /doctor ────────────────────────────────────────────────────────
+        @self.tree.command(name="doctor", description="检查配置、推荐安装项和主要功能可用性")
+        async def slash_doctor(interaction: discord.Interaction):
+            if not self._is_owner_interaction(interaction):
+                return
+            t0 = time.time()
+            embed = self._doctor_embed(t0)
+            await interaction.response.send_message(embed=embed)
 
         # ── /stop ──────────────────────────────────────────────────────────
         @self.tree.command(name="stop", description="停止当前正在执行的任务")
@@ -369,13 +382,21 @@ class StarBotClient(discord.Client):
                 return
             t0 = time.time()
             EDITABLE = {"LLM_MODEL", "LLM_API_BASE", "LLM_API_KEY", "DISCORD_PROXY"}
+            SECRET_KEYS = {"LLM_API_KEY", "DISCORD_BOT_TOKEN"}
             if key is None:
-                lines = [f"`{k}`: `{getattr(config, k, '')}`" for k in sorted(EDITABLE)]
+                lines = []
+                for k in sorted(EDITABLE):
+                    val = getattr(config, k, "")
+                    if k in SECRET_KEYS:
+                        val = self._mask_secret(str(val))
+                    lines.append(f"`{k}`: `{val}`")
                 embed = discord.Embed(title="⚙️ 配置项", description="\n".join(lines), color=0x3498db)
                 embed.set_footer(text="/config <key> <value> 修改 | " + self._footer(t0))
             elif value is None:
                 k = key.upper()
                 val = getattr(config, k, "（未知配置项）")
+                if k in SECRET_KEYS and isinstance(val, str):
+                    val = self._mask_secret(val)
                 embed = discord.Embed(description=f"`{k}` = `{val}`", color=0x3498db)
                 embed.set_footer(text=self._footer(t0))
             else:
@@ -394,6 +415,107 @@ class StarBotClient(discord.Client):
     def _footer(self, t0: float) -> str:
         ms = int((time.time() - t0) * 1000)
         return f"{config.LLM_API_BASE} / {config.LLM_MODEL} | {ms}ms"
+
+    @staticmethod
+    def _mask_secret(value: str, keep: int = 4) -> str:
+        if not value:
+            return "未配置"
+        if len(value) <= keep * 2:
+            return "*" * len(value)
+        return f"{value[:keep]}...{value[-keep:]}"
+
+    @staticmethod
+    def _has_module(import_name: str) -> bool:
+        try:
+            return importlib.util.find_spec(import_name) is not None
+        except Exception:
+            return False
+
+    def _doctor_embed(self, t0: float) -> discord.Embed:
+        base_dir = Path(__file__).resolve().parent.parent
+        mem_db = base_dir / "starbot_memory.db"
+        sessions_dir = base_dir / "logs" / "sessions"
+        session_files = 0
+        try:
+            if sessions_dir.exists():
+                session_files = sum(1 for _ in sessions_dir.glob("*.json"))
+        except Exception:
+            session_files = 0
+
+        # Config (masked where sensitive)
+        cfg_lines = [
+            f"`LLM_API_BASE` {'✅' if bool(config.LLM_API_BASE) else '❌'} `{config.LLM_API_BASE or ''}`",
+            f"`LLM_API_KEY` {'✅' if bool(config.LLM_API_KEY) else '❌'} `{self._mask_secret(config.LLM_API_KEY)}`",
+            f"`LLM_MODEL` {'✅' if bool(config.LLM_MODEL) else '⚠️'} `{config.LLM_MODEL or ''}`",
+            f"`DISCORD_BOT_TOKEN` {'✅' if bool(config.DISCORD_BOT_TOKEN) else '❌'} `{self._mask_secret(config.DISCORD_BOT_TOKEN)}`",
+            f"`DISCORD_OWNER_ID` {'✅' if bool(config.DISCORD_OWNER_ID) else '❌'} `{config.DISCORD_OWNER_ID or ''}`",
+            f"`DISCORD_CHANNEL_ID` {'✅' if bool(getattr(config, 'DISCORD_CHANNEL_ID', 0)) else '⚠️'} `{getattr(config, 'DISCORD_CHANNEL_ID', 0)}`",
+            f"`DISCORD_PROXY` {'✅' if bool(config.DISCORD_PROXY) else '·'} `{config.DISCORD_PROXY or '(none)'}`",
+        ]
+
+        # Recommended installs / capabilities
+        has_playwright = self._has_module("playwright")
+        has_pytesseract = self._has_module("pytesseract")
+        has_tesseract_bin = bool(shutil.which("tesseract"))
+        has_ytdlp_mod = self._has_module("yt_dlp")
+        has_ytdlp_bin = bool(shutil.which("yt-dlp"))
+        has_whisper = self._has_module("faster_whisper")
+        has_trafilatura = self._has_module("trafilatura")
+
+        comp_lines = [
+            f"{'✅' if has_playwright else '⚠️'} Playwright module (`browser_agent`)",
+            f"{'✅' if has_pytesseract else '⚠️'} pytesseract module (OCR Python binding)",
+            f"{'✅' if has_tesseract_bin else '⚠️'} Tesseract binary (OCR engine)",
+            f"{'✅' if (has_ytdlp_mod or has_ytdlp_bin) else '⚠️'} yt-dlp (video subtitle/download)",
+            f"{'✅' if has_whisper else '⚠️'} faster-whisper (subtitle fallback transcription)",
+            f"{'✅' if has_trafilatura else '⚠️'} trafilatura (better webpage extraction)",
+        ]
+
+        feature_lines = [
+            f"{'✅' if (has_pytesseract and has_tesseract_bin) else '⚠️'} OCR (`read_screen_text` / `wait_for_text`)",
+            f"{'✅' if has_playwright else '⚠️'} Browser skill (`browser_agent`)",
+            f"{'✅' if (has_ytdlp_mod or has_ytdlp_bin) else '⚠️'} Video subtitle extraction (`video_learn`)",
+            f"{'✅' if ((has_ytdlp_mod or has_ytdlp_bin) and has_whisper) else '⚠️'} Video transcription fallback (Whisper)",
+        ]
+
+        install_suggestions: list[str] = []
+        if not has_playwright:
+            install_suggestions.append("`pip install playwright`")
+            install_suggestions.append("`playwright install chromium`")
+        if not has_pytesseract:
+            install_suggestions.append("`pip install pytesseract`")
+        if not has_tesseract_bin:
+            install_suggestions.append("Install Tesseract OCR binary (UB Mannheim build) and add to PATH")
+        if not (has_ytdlp_mod or has_ytdlp_bin):
+            install_suggestions.append("`pip install yt-dlp`")
+        if not has_whisper:
+            install_suggestions.append("`pip install faster-whisper`")
+        if not has_trafilatura:
+            install_suggestions.append("`pip install trafilatura`")
+        if not install_suggestions:
+            install_suggestions.append("✅ 推荐组件已基本齐全")
+
+        runtime_lines = [
+            f"Skills loaded: `{len(_skill_manager.list_skills())}`",
+            f"Active foreground tasks: `{len(self._active_task_handles)}`",
+            f"Active sessions: `{len(self._session_brains)}`",
+            f"Persisted session files: `{session_files}`",
+            f"Memory DB: `{'present' if mem_db.exists() else 'missing'}`" + (f" ({mem_db.stat().st_size // 1024} KB)" if mem_db.exists() else ""),
+        ]
+
+        embed = discord.Embed(
+            title="🩺 Doctor / 环境体检",
+            description="检查配置、推荐安装项与主要功能可用性（不会修改任何配置）",
+            color=0x3498db,
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="配置状态", value="\n".join(cfg_lines)[:1024], inline=False)
+        embed.add_field(name="推荐安装项", value="\n".join(comp_lines)[:1024], inline=False)
+        embed.add_field(name="安装建议", value="\n".join(f"• {x}" for x in install_suggestions)[:1024], inline=False)
+        embed.add_field(name="功能可用性", value="\n".join(feature_lines)[:1024], inline=False)
+        embed.add_field(name="运行态", value="\n".join(runtime_lines)[:1024], inline=False)
+        embed.set_footer(text="建议：缺少 ⚠️ 项时按 README 安装对应组件 | " + self._footer(t0))
+        return embed
 
     def _is_owner(self, message: discord.Message) -> bool:
         oid = config.DISCORD_OWNER_ID
@@ -611,6 +733,8 @@ class StarBotClient(discord.Client):
 
         if text == "/status":
             await self._cmd_status(message, t0)
+        elif text == "/doctor":
+            await self._cmd_doctor(message, t0)
         elif text == "/help":
             await self._cmd_help(message)
         elif text == "/stop":
@@ -673,6 +797,7 @@ class StarBotClient(discord.Client):
         embed = discord.Embed(title="📖 Starbot 命令", color=0x3498db)
         embed.add_field(name="对话", value="直接发消息即可", inline=False)
         embed.add_field(name="/status", value="查看系统状态和后台任务", inline=False)
+        embed.add_field(name="/doctor", value="检查配置、推荐安装项和功能可用性", inline=False)
         embed.add_field(name="/stop", value="停止当前任务", inline=False)
         embed.add_field(name="/screenshot", value="截取当前屏幕", inline=False)
         embed.add_field(name="/model [名称]", value="查看/切换模型", inline=False)
@@ -697,6 +822,11 @@ class StarBotClient(discord.Client):
         embed.add_field(name="当前对话", value=task_str, inline=False)
         embed.add_field(name="后台任务", value=bg_summary, inline=False)
         embed.set_footer(text=self._footer(t0))
+        await message.reply(embed=embed)
+
+    async def _cmd_doctor(self, message: discord.Message, t0: float):
+        """Check config, recommended installs, and feature availability."""
+        embed = self._doctor_embed(t0)
         await message.reply(embed=embed)
 
     async def _cmd_screenshot(self, message: discord.Message, t0: float):
@@ -775,8 +905,8 @@ class StarBotClient(discord.Client):
 
     async def _stream_response(self, msg: discord.Message, brain: Brain, t0: float) -> tuple:
         """将 LLM 流式回复写入已有消息 msg（同时移除状态按钮）。
-        若 LLM 先输出文字后切换为工具调用，会立即撤回草稿文字、还原思考状态。
-        返回 (action, accumulated_text)。"""
+        若 LLM 先输出文字后切换为工具调用，保留已输出的正常文字（如计划/回答），
+        仅清理明显异常的数字刷屏内容。返回 (action, accumulated_text)。"""
         q: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_event_loop()
         action_holder: list = []
@@ -804,13 +934,16 @@ class StarBotClient(discord.Client):
             if chunk is None:
                 break
 
-            # ── 清除信号：LLM 已切换到工具调用，草稿文字作废 ────────────────
+            # ── 清除信号：LLM 已切换到工具调用 ───────────────────────────────
             if chunk is StarBotClient._CLEAR_SENTINEL:
-                if accumulated:
-                    log.debug("_stream_response: LLM 切换到工具调用，清除已流式显示的草稿文字（%d 字符）", len(accumulated))
+                # 保留正常的 AI 文本（例如计划/解释），仅清理异常数字刷屏。
+                if accumulated and not should_preserve_stream_text_on_tool_switch(accumulated):
+                    log.warning(
+                        "_stream_response: 切换工具调用前清理数字刷屏内容（%d 字符）",
+                        len(accumulated),
+                    )
                     accumulated = ""
                     started = False
-                    # 还原消息为思考动画状态，等待工具执行动画接管
                     try:
                         await msg.edit(
                             embed=discord.Embed(description="⠋  思考中…", color=0x5865f2),
@@ -839,24 +972,23 @@ class StarBotClient(discord.Client):
 
         await stream_task
 
-        # ── 兜底过滤：纯数字序列或大多数行是数字 → 视为无效草稿丢弃 ────────
-        if accumulated:
-            lines = [l.strip() for l in accumulated.strip().splitlines() if l.strip()]
-            if len(lines) >= 5:
-                digit_lines = sum(1 for l in lines if l.isdigit())
-                if digit_lines / len(lines) > 0.7:
-                    log.warning(
-                        "_stream_response: 兜底过滤了垃圾输出（%d/%d 行为纯数字）",
-                        digit_lines, len(lines),
-                    )
-                    accumulated = ""
-                    try:
-                        await msg.edit(
-                            embed=discord.Embed(description="⠋  思考中…", color=0x5865f2),
-                            view=None,
-                        )
-                    except Exception:
-                        pass
+        # ── 兜底过滤：数字刷屏（如 1..100） ────────────────────────────────
+        if accumulated and self._is_numeric_spam_text(accumulated):
+            log.warning("_stream_response: 兜底过滤了数字刷屏输出（%d 字符）", len(accumulated))
+            accumulated = ""
+            if action_holder and isinstance(action_holder[0], dict) and "text" in action_holder[0]:
+                text = action_holder[0].get("text", "")
+                if self._is_numeric_spam_text(text):
+                    if brain.messages and brain.messages[-1].get("role") == "assistant":
+                        brain.messages.pop()
+                    action_holder[0] = None
+            try:
+                await msg.edit(
+                    embed=discord.Embed(description="⠋  思考中…", color=0x5865f2),
+                    view=None,
+                )
+            except Exception:
+                pass
 
         if accumulated:
             embed = discord.Embed(
@@ -869,6 +1001,10 @@ class StarBotClient(discord.Client):
                 pass
 
         return action_holder[0] if action_holder else None, accumulated
+
+    @staticmethod
+    def _is_numeric_spam_text(text: str) -> bool:
+        return is_numeric_spam_text(text)
 
     @staticmethod
     def _parse_plan_steps(text: str) -> list[str]:
@@ -927,6 +1063,9 @@ class StarBotClient(discord.Client):
                         action, plan_text = await self._stream_response(cur_msg, brain, t0)
                         if plan_text:
                             keep_cur = True   # AI 输出了文字 → 这条消息要保留
+                        elif not action:
+                            # 流式阶段可能被垃圾输出过滤，立即回退到非流式再试一次
+                            action = await asyncio.to_thread(brain._call_native)
                     else:
                         action = await asyncio.to_thread(brain._call_native)
                 except asyncio.CancelledError:
@@ -958,6 +1097,27 @@ class StarBotClient(discord.Client):
 
                 # ── 纯文字回复（非工具调用）──────────────────────────────────
                 if isinstance(action, dict) and "text" in action and "name" not in action:
+                    if self._is_numeric_spam_text(action.get("text", "")):
+                        log.warning("_handle: drop numeric spam text reply and retry")
+                        if brain.messages and brain.messages[-1].get("role") == "assistant":
+                            brain.messages.pop()
+                        # 恢复思考状态，继续下一轮
+                        if cur_msg is not None:
+                            try:
+                                await cur_msg.edit(
+                                    embed=discord.Embed(description="⠋  思考中…", color=0x5865f2),
+                                    view=self._make_status_view(thinking=True, tools_count=tools_called),
+                                )
+                            except Exception:
+                                pass
+                        anim_stop = asyncio.Event()
+                        anim_task = asyncio.create_task(
+                            self._spin_status(
+                                cur_msg, "思考中", anim_stop, t0,
+                                thinking=True, tools_count=tools_called,
+                            )
+                        )
+                        continue
                     if i > 0:
                         # 追加一条新的永久消息
                         embed = discord.Embed(
@@ -1305,14 +1465,22 @@ class StarBotClient(discord.Client):
         """View or set editable config values."""
         parts = text.split(maxsplit=2)
         EDITABLE = {"LLM_MODEL", "LLM_API_BASE", "LLM_API_KEY", "DISCORD_PROXY"}
+        SECRET_KEYS = {"LLM_API_KEY", "DISCORD_BOT_TOKEN"}
 
         if len(parts) == 1:
-            lines = [f"`{k}`: `{getattr(config, k, '')}`" for k in sorted(EDITABLE)]
+            lines = []
+            for k in sorted(EDITABLE):
+                val = getattr(config, k, "")
+                if k in SECRET_KEYS:
+                    val = self._mask_secret(str(val))
+                lines.append(f"`{k}`: `{val}`")
             embed = discord.Embed(title="⚙️ 配置项", description="\n".join(lines), color=0x3498db)
             embed.set_footer(text="/config <key> <value> 修改 | " + self._footer(t0))
         elif len(parts) == 2:
             k = parts[1].upper()
             val = getattr(config, k, "（未知配置项）")
+            if k in SECRET_KEYS and isinstance(val, str):
+                val = self._mask_secret(val)
             embed = discord.Embed(description=f"`{k}` = `{val}`", color=0x3498db)
             embed.set_footer(text=self._footer(t0))
         else:
