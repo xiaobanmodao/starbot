@@ -93,6 +93,74 @@ def test_install_local_skillmd_dir_copies_into_managed_store_and_remove(local_tm
     assert mgr.list_skills() == []
 
 
+def test_skill_info_and_recommendations_for_installed_skillmd(local_tmp_dir):
+    py_dir = local_tmp_dir / "skills"
+    ext_dir = local_tmp_dir / "skills_ext"
+    source_skill = _write_skillmd(
+        local_tmp_dir / "downloaded" / "deploy_skill",
+        name="Docker Deploy Helper",
+        desc="Deploy apps with docker compose and service rollout checks.",
+    )
+
+    mgr = SkillManager(skills_dir=py_dir, ext_skills_dir=ext_dir, discovery_roots=[])
+    ok, msg = mgr.install(str(source_skill))
+    assert ok is True, msg
+
+    skill = mgr.list_skills()[0]
+    info = mgr.get_skill_info(skill["name"])
+    assert info is not None
+    assert info["kind"] == "skillmd"
+    assert info["managed"] is True
+    assert info["source"] == str(source_skill)
+    assert "docker" in {k.lower() for k in info["keywords"]}
+
+    recs = mgr.recommend_skills("帮我用 docker compose 部署并检查服务状态", limit=3)
+    assert recs, "expected at least one recommended skill"
+    assert recs[0]["name"] == info["name"]
+    assert any(k in {"docker", "compose"} for k in recs[0]["matched_keywords"])
+
+
+def test_update_managed_skillmd_uses_recorded_source(local_tmp_dir):
+    py_dir = local_tmp_dir / "skills"
+    ext_dir = local_tmp_dir / "skills_ext"
+    source_skill = _write_skillmd(
+        local_tmp_dir / "downloaded" / "updatable_skill",
+        name="Updater Demo",
+        desc="Initial description",
+    )
+
+    mgr = SkillManager(skills_dir=py_dir, ext_skills_dir=ext_dir, discovery_roots=[])
+    ok, msg = mgr.install(str(source_skill))
+    assert ok is True, msg
+
+    installed_name = mgr.list_skills()[0]["name"]
+    info_before = mgr.get_skill_info(installed_name)
+    assert info_before and info_before["description"] == "Initial description"
+
+    # Modify original source skill and run update().
+    (source_skill / "SKILL.md").write_text(
+        (
+            "---\n"
+            "name: Updater Demo\n"
+            "description: Updated description for rollout automation\n"
+            "version: 1.1.0\n"
+            "author: test\n"
+            "---\n\n"
+            "# Updater Demo\n\n"
+            "Use `scripts/run.py` for rollout health checks.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    ok_upd, msg_upd = mgr.update(installed_name)
+    assert ok_upd is True, msg_upd
+
+    info_after = mgr.get_skill_info(installed_name)
+    assert info_after is not None
+    assert info_after["description"].startswith("Updated description")
+    assert info_after["source"] == str(source_skill)
+
+
 def test_remove_discovered_external_skill_is_blocked(local_tmp_dir):
     py_dir = local_tmp_dir / "skills"
     ext_dir = local_tmp_dir / "skills_ext"
@@ -145,8 +213,9 @@ def test_skillsmp_page_install_resolves_github_link(monkeypatch, local_tmp_dir):
 
     seen = {}
 
-    def fake_install_from_github(url):
+    def fake_install_from_github(url, record_source=None):
         seen["url"] = url
+        seen["record_source"] = record_source
         return True, "ok"
 
     monkeypatch.setattr("core.skill_manager.requests.get", fake_get)
@@ -156,3 +225,4 @@ def test_skillsmp_page_install_resolves_github_link(monkeypatch, local_tmp_dir):
     assert ok is True
     assert "skillsmp" in msg
     assert seen["url"] == "https://github.com/example/repo/tree/main/skills/demo"
+    assert seen["record_source"] == "https://skillsmp.com/skills/some-skill"

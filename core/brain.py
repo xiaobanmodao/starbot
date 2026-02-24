@@ -4,7 +4,7 @@ import base64
 import logging
 
 from core.adapter import UniversalLLM
-from actions.executor import TOOLS_SCHEMA, SCREENSHOT_PATH, execute
+from actions.executor import TOOLS_SCHEMA, SCREENSHOT_PATH, execute, _skill_manager
 from memory.store import MemoryStore
 from config import config
 
@@ -172,14 +172,25 @@ class Brain:
             return None
 
     def _append_user(self, text: str, image_path: str | None = None):
-        # 首条用户消息时，把相关记忆直接拼入消息，不额外增加消息轮次
+        # On the first user message, inject relevant memories and skill recommendations.
         if len(self.messages) == 1 and text and not image_path:
-            # 用多关键词策略检索，比单次全文搜索召回率高得多
+            blocks: list[str] = []
+            try:
+                rec_hint = _skill_manager.build_recommendation_hint(text, limit=3)
+            except Exception as e:
+                log.debug("skill recommendation hint failed: %s", e)
+                rec_hint = ""
+            if rec_hint:
+                blocks.append(f"[Skill Recommendations]\n{rec_hint}")
+
             relevant = self._memory.search_multi(text, limit=6)
             contents = [r["content"] for r in relevant]
             if contents:
                 mem_block = "\n".join(f"- {m[:200]}" for m in contents)
-                text = f"[相关记忆]\n{mem_block}\n\n{text}"
+                blocks.append(f"[Relevant Memory]\n{mem_block}")
+
+            if blocks:
+                text = "\n\n".join(blocks + [text])
         if image_path:
             img = self._image_content(image_path)
             if img:

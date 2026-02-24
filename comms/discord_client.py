@@ -366,6 +366,23 @@ class StarBotClient(discord.Client):
                 ok, msg = _skill_manager.remove(arg)
                 embed = discord.Embed(description=f"{'✅' if ok else '❌'} {msg}", color=0x2ecc71 if ok else 0xe74c3c)
                 await interaction.response.send_message(embed=embed)
+            elif sub == "info":
+                if not arg:
+                    await interaction.response.send_message("用法：`/skill info <skill名称>`", ephemeral=True)
+                    return
+                info = _skill_manager.get_skill_info(arg)
+                if not info:
+                    await interaction.response.send_message(f"未找到 skill: `{arg}`", ephemeral=True)
+                    return
+                await interaction.response.send_message(embed=self._skill_info_embed(info))
+            elif sub == "update":
+                if not arg:
+                    await interaction.response.send_message("用法：`/skill update <skill名称>`", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                ok, msg = await asyncio.to_thread(_skill_manager.update, arg)
+                embed = discord.Embed(description=f"{'✅' if ok else '❌'} {msg}", color=0x2ecc71 if ok else 0xe74c3c)
+                await interaction.followup.send(embed=embed)
             elif sub == "reload":
                 _skill_manager.reload()
                 skills = _skill_manager.list_skills()
@@ -757,6 +774,10 @@ class StarBotClient(discord.Client):
             await self._cmd_skill_install(message, text[15:].strip())
         elif text.startswith("/skill remove "):
             await self._cmd_skill_remove(message, text[14:].strip())
+        elif text.startswith("/skill info "):
+            await self._cmd_skill_info(message, text[12:].strip())
+        elif text.startswith("/skill update "):
+            await self._cmd_skill_update(message, text[14:].strip())
         elif text == "/skill reload":
             await self._cmd_skill_reload(message)
         elif text == "/memory" or text.startswith("/memory "):
@@ -1311,6 +1332,35 @@ class StarBotClient(discord.Client):
         await message.reply(embed=embed)
         self._model_list[message.author.id] = models
 
+    def _skill_info_embed(self, info: dict) -> discord.Embed:
+        tools = info.get("tools") or []
+        tools_str = "、".join(f"`{t}`" for t in tools) if tools else "（无工具）"
+        keywords = info.get("keywords") or []
+        kw_str = "、".join(f"`{k}`" for k in keywords[:16]) if keywords else "（无）"
+        lines = [
+            f"类型: `{info.get('kind', '?')}`",
+            f"托管: `{'yes' if info.get('managed') else 'no'}`",
+            f"ID: `{info.get('id', '')}`",
+        ]
+        if info.get("author"):
+            lines.append(f"作者: `{info.get('author')}`")
+        if info.get("version"):
+            lines.append(f"版本: `{info.get('version')}`")
+        if info.get("source"):
+            lines.append(f"来源: `{info.get('source')}`")
+        if info.get("path"):
+            lines.append(f"路径: `{info.get('path')}`")
+
+        embed = discord.Embed(
+            title=f"🔎 Skill: {info.get('name', '')}",
+            description=info.get("description", "") or "（无描述）",
+            color=0x3498db,
+        )
+        embed.add_field(name="信息", value="\n".join(lines)[:1024], inline=False)
+        embed.add_field(name="工具", value=tools_str[:1024], inline=False)
+        embed.add_field(name="关键词（推荐索引）", value=kw_str[:1024], inline=False)
+        return embed
+
     async def _cmd_skill_list(self, message: discord.Message):
         skills = _skill_manager.list_skills()
         if not skills:
@@ -1328,7 +1378,7 @@ class StarBotClient(discord.Client):
                     value=f"{s['description']}\n工具：{tools_str}",
                     inline=False,
                 )
-        embed.set_footer(text="/skill install <URL>  |  /skill remove <name>  |  /skill reload")
+        embed.set_footer(text="/skill install <URL> | /skill info <name> | /skill update <name> | /skill remove <name> | /skill reload")
         await message.reply(embed=embed)
 
     async def _cmd_skill_install(self, message: discord.Message, source: str):
@@ -1345,6 +1395,26 @@ class StarBotClient(discord.Client):
         if ok:
             embed.set_footer(text="新工具将在下一次对话中生效")
         await thinking.edit(embed=embed)
+
+    async def _cmd_skill_info(self, message: discord.Message, name: str):
+        if not name:
+            await message.reply("用法：`/skill info <skill名称>`")
+            return
+        info = _skill_manager.get_skill_info(name)
+        if not info:
+            await message.reply(embed=discord.Embed(description=f"❌ 未找到 skill: `{name}`", color=0xe74c3c))
+            return
+        await message.reply(embed=self._skill_info_embed(info))
+
+    async def _cmd_skill_update(self, message: discord.Message, name: str):
+        if not name:
+            await message.reply("用法：`/skill update <skill名称>`")
+            return
+        thinking = await message.reply(embed=discord.Embed(description="⏳ 更新中…", color=0x95a5a6))
+        ok, msg = await asyncio.to_thread(_skill_manager.update, name)
+        color = 0x2ecc71 if ok else 0xe74c3c
+        icon = "✅" if ok else "❌"
+        await thinking.edit(embed=discord.Embed(description=f"{icon} {msg}", color=color))
 
     async def _cmd_skill_remove(self, message: discord.Message, name: str):
         if not name:
