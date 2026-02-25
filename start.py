@@ -96,12 +96,37 @@ def _pip_install(packages: list[str]) -> bool:
     """Install pip packages and return whether the install succeeded."""
     if not packages:
         return True
-    cmd = _installer() + packages
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"  ERROR install failed:\n{(r.stderr or r.stdout)[:800]}")
-        return False
-    return True
+    cmds: list[list[str]] = []
+    uv_path = shutil.which("uv")
+    if uv_path:
+        cmds.append(["uv", "pip", "install"] + packages)
+    cmds.append([sys.executable, "-m", "pip", "install"] + packages)
+
+    last_err_text = ""
+    for idx, cmd in enumerate(cmds):
+        label = "uv" if cmd and cmd[0].lower() == "uv" else "pip"
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        except OSError as e:
+            if idx < len(cmds) - 1:
+                if getattr(e, "winerror", None) == 4551:
+                    print(f"  warning: {label} is blocked by application control policy, falling back...")
+                else:
+                    print(f"  warning: failed to launch {label} installer ({e}), falling back...")
+                continue
+            last_err_text = str(e)
+            break
+
+        if r.returncode == 0:
+            return True
+
+        last_err_text = (r.stderr or r.stdout or "").strip()[:800]
+        if idx < len(cmds) - 1:
+            print(f"  warning: {label} install failed, trying fallback installer...")
+            continue
+
+    print(f"  ERROR install failed:\n{last_err_text}")
+    return False
 
 
 def _ensure_bootstrap_deps_for_config() -> bool:
