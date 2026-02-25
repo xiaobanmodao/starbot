@@ -17,6 +17,7 @@ Format:
 - `tools/changelog_release.py` helper to archive `Unreleased` into a versioned changelog section
 - Local GUI client (`python start_gui.py`) built on top of the same Brain/tools core
 - Web UI client (`python start_webui.py`) with a Tauri/Electron-ready frontend shell and local Python service API
+- Desktop client launcher (`python start_desktop.py`) using a native window (`pywebview`) around the Web UI
 
 ### Changed
 - `Brain` now injects a `[Skill Recommendations]` hint on the first user message
@@ -24,6 +25,7 @@ Format:
 - `SkillManager.list_skills()` now includes source metadata fields
 - Discord reply/control flow remains available; GUI is an additional client entrypoint, not a replacement
 - Discord reply/control flow remains available; Web UI is also an additional client entrypoint, not a replacement
+- Desktop client reuses the same local Web UI service and preserves existing Discord mode (`python start.py`)
 
 ### Fixed
 - `SkillManager.update()` no longer depends on system temp directories on Windows
@@ -34,6 +36,7 @@ Format:
 - `get_skill_info()` and recommendation results
 - `update()` behavior for managed `SKILL.md` skills
 - `skillsmp.com` source passthrough regression
+- Added `tests/test_start_desktop_smoke.py`
 
 ## [2026-02-24]
 

@@ -28,6 +28,11 @@ dependencies = [
 [project.scripts]
 starbot = "start:main"
 
+[project.optional-dependencies]
+desktop = [
+    "pywebview>=5.4",
+]
+
 [tool.setuptools]
 py-modules = ["start", "config", "main"]
 
