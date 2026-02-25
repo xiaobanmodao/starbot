@@ -16,12 +16,14 @@ Format:
 - External skill keyword indexing and auto recommendations for better tool routing
 - `tools/changelog_release.py` helper to archive `Unreleased` into a versioned changelog section
 - Local GUI client (`python start_gui.py`) built on top of the same Brain/tools core
+- Web UI client (`python start_webui.py`) with a Tauri/Electron-ready frontend shell and local Python service API
 
 ### Changed
 - `Brain` now injects a `[Skill Recommendations]` hint on the first user message
 - `SkillManager` records `source` and `source_kind` metadata for installed skills
 - `SkillManager.list_skills()` now includes source metadata fields
 - Discord reply/control flow remains available; GUI is an additional client entrypoint, not a replacement
+- Discord reply/control flow remains available; Web UI is also an additional client entrypoint, not a replacement
 
 ### Fixed
 - `SkillManager.update()` no longer depends on system temp directories on Windows

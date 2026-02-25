@@ -48,6 +48,19 @@ class SessionController:
     def has_session(self) -> bool:
         return self._brain is not None
 
+    def usage_snapshot(self) -> dict[str, Any]:
+        brain = self._brain
+        if brain is None:
+            return {"input": 0, "output": 0, "calls": 0}
+        usage = getattr(brain, "usage", None)
+        if isinstance(usage, dict):
+            return {
+                "input": int(usage.get("input", 0) or 0),
+                "output": int(usage.get("output", 0) or 0),
+                "calls": int(usage.get("calls", 0) or 0),
+            }
+        return {"input": 0, "output": 0, "calls": 0}
+
     # ------------------------------------------------------------------ events
 
     def _emit(self, type_: str, **payload):
@@ -206,4 +219,3 @@ class SessionController:
             self._emit("done", reason="error")
         finally:
             self._emit("busy", value=False)
-

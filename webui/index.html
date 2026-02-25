@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Starbot Control Center</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="side-rail">
+      <div class="brand">
+        <div class="brand-mark">SB</div>
+        <div>
+          <h1>Starbot</h1>
+          <p>Control Center</p>
+        </div>
+      </div>
+      <nav class="nav-tabs" id="navTabs">
+        <button class="nav-tab active" data-view="chat">Chat</button>
+        <button class="nav-tab" data-view="commands">Command Center</button>
+        <button class="nav-tab" data-view="doctor">Doctor</button>
+        <button class="nav-tab" data-view="config">Config</button>
+        <button class="nav-tab" data-view="skills">Skills</button>
+        <button class="nav-tab" data-view="memory">Memory</button>
+        <button class="nav-tab" data-view="tasks">Tasks</button>
+      </nav>
+      <div class="side-footer">
+        <p>Discord mode remains available.</p>
+        <p class="muted">This UI is an additional local client.</p>
+      </div>
+    </aside>
+
+    <main class="main-pane">
+      <header class="top-bar">
+        <div class="status-cluster">
+          <span class="status-dot" id="sessionBusyDot"></span>
+          <span id="sessionBusyText">Idle</span>
+          <span class="divider"></span>
+          <span id="modelLabel">Model: -</span>
+        </div>
+        <div class="top-actions">
+          <button class="btn subtle" id="btnQuickStatus">Refresh Status</button>
+          <button class="btn subtle" id="btnQuickDoctor">Doctor</button>
+          <button class="btn" id="btnOpenScreenshot">Screenshot</button>
+        </div>
+      </header>
+
+      <section class="view active" id="view-chat">
+        <div class="grid two-col">
+          <section class="card tall">
+            <div class="card-head">
+              <h2>Conversation</h2>
+              <div class="inline-actions">
+                <button class="btn subtle" id="btnChatReset">New Session</button>
+                <button class="btn subtle danger" id="btnChatStop">Stop</button>
+              </div>
+            </div>
+            <div class="chat-feed" id="chatFeed"></div>
+            <div class="composer">
+              <textarea id="chatInput" placeholder="输入任务或问题。支持普通对话和复杂任务..." rows="4"></textarea>
+              <div class="composer-actions">
+                <span class="muted">Ctrl/Cmd + Enter 发送</span>
+                <button class="btn primary" id="btnChatSend">Send</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="stack">
+            <section class="card half">
+              <div class="card-head">
+                <h2>Run Log</h2>
+                <button class="btn subtle" id="btnClearEventLog">Clear</button>
+              </div>
+              <pre class="log-box" id="eventLog"></pre>
+            </section>
+            <section class="card half">
+              <div class="card-head">
+                <h2>Session Usage</h2>
+              </div>
+              <div class="stats-grid" id="usageStats">
+                <div class="stat"><label>Input</label><strong id="usageInput">0</strong></div>
+                <div class="stat"><label>Output</label><strong id="usageOutput">0</strong></div>
+                <div class="stat"><label>Calls</label><strong id="usageCalls">0</strong></div>
+              </div>
+              <div class="hint-list">
+                <p>最终回答显示在左侧聊天区。</p>
+                <p>工具调用和过程日志显示在这里，不会混入最终回答。</p>
+              </div>
+            </section>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-commands">
+        <div class="grid two-col">
+          <section class="card">
+            <div class="card-head">
+              <h2>Command Console</h2>
+              <button class="btn subtle" id="btnLoadHelp">Load Help</button>
+            </div>
+            <p class="muted mb12">执行与 Discord 文本命令一致的命令（如 <code>/doctor</code>、<code>/skill list</code>、<code>/memory stats</code>、<code>/config LLM_MODEL xxx</code>）。</p>
+            <textarea id="commandInput" rows="4" placeholder="/doctor"></textarea>
+            <div class="inline-actions mt12">
+              <button class="btn primary" id="btnRunCommand">Run Command</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>Command Result</h2>
+              <button class="btn subtle" id="btnCopyCommandResult">Copy JSON</button>
+            </div>
+            <pre class="json-box" id="commandResult"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-doctor">
+        <div class="grid three-col">
+          <section class="card">
+            <div class="card-head"><h2>Runtime</h2><button class="btn subtle" id="btnRefreshDoctor">Refresh</button></div>
+            <div id="doctorRuntime" class="list-block"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Config Checks</h2></div>
+            <div id="doctorConfigChecks" class="list-block"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Feature Availability</h2></div>
+            <div id="doctorFeatures" class="list-block"></div>
+          </section>
+        </div>
+        <section class="card mt14">
+          <div class="card-head"><h2>Recommended Components</h2></div>
+          <div id="doctorChecksTable" class="table-wrap"></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-config">
+        <div class="card">
+          <div class="card-head">
+            <h2>Configuration</h2>
+            <div class="inline-actions">
+              <button class="btn subtle" id="btnReloadConfig">Reload</button>
+              <button class="btn primary" id="btnSaveConfig">Save Selected Fields</button>
+            </div>
+          </div>
+          <p class="muted mb12">可在此修改核心配置。敏感值显示为脱敏状态；如需更新，请直接输入新值覆盖。</p>
+          <div class="form-grid" id="configForm"></div>
+          <div class="form-note">保存会写入 `.env`（`LLM_MODEL` 同时写入运行态 state）。Discord 功能保持不变。</div>
+        </div>
+      </section>
+
+      <section class="view" id="view-skills">
+        <div class="grid two-col">
+          <section class="card">
+            <div class="card-head">
+              <h2>Skills</h2>
+              <div class="inline-actions">
+                <button class="btn subtle" id="btnReloadSkills">Reload</button>
+                <button class="btn subtle" id="btnRefreshSkills">Refresh</button>
+              </div>
+            </div>
+            <div id="skillsTable" class="table-wrap"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Skill Actions</h2></div>
+            <label class="label">Install source (URL / local path)</label>
+            <input id="skillInstallSource" type="text" placeholder="https://skillsmp.com/skills/..." />
+            <button class="btn primary mt12" id="btnSkillInstall">Install</button>
+
+            <div class="divider-line"></div>
+            <label class="label">Skill name</label>
+            <input id="skillNameAction" type="text" placeholder="Skill name" />
+            <div class="inline-actions mt12 wrap">
+              <button class="btn subtle" id="btnSkillInfo">Info</button>
+              <button class="btn subtle" id="btnSkillUpdate">Update</button>
+              <button class="btn subtle danger" id="btnSkillRemove">Remove</button>
+            </div>
+            <pre class="json-box mt12" id="skillActionResult"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-memory">
+        <div class="grid two-col">
+          <section class="card">
+            <div class="card-head">
+              <h2>Memory Browser</h2>
+              <div class="inline-actions">
+                <button class="btn subtle" id="btnMemoryStats">Stats</button>
+                <button class="btn subtle" id="btnMemoryRefresh">Refresh</button>
+              </div>
+            </div>
+            <div class="inline-controls">
+              <input id="memoryCategory" type="text" placeholder="Category (blank = all)" />
+              <button class="btn subtle" id="btnMemoryList">List</button>
+            </div>
+            <div id="memoryListTable" class="table-wrap mt12"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Memory Search / Delete</h2></div>
+            <label class="label">Search query</label>
+            <input id="memorySearchQuery" type="text" placeholder="关键词 / keywords" />
+            <button class="btn primary mt12" id="btnMemorySearch">Search</button>
+            <div id="memorySearchTable" class="table-wrap mt12"></div>
+
+            <div class="divider-line"></div>
+            <label class="label">Delete memory ID</label>
+            <input id="memoryDeleteId" type="number" placeholder="123" />
+            <button class="btn subtle danger mt12" id="btnMemoryDelete">Delete</button>
+            <pre class="json-box mt12" id="memoryActionResult"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-tasks">
+        <div class="card">
+          <div class="card-head">
+            <h2>Background Tasks</h2>
+            <button class="btn subtle" id="btnRefreshTasks">Refresh</button>
+          </div>
+          <div id="tasksTable" class="table-wrap"></div>
+          <div class="divider-line"></div>
+          <label class="label">Rollback recent file operations</label>
+          <div class="inline-controls">
+            <input id="rollbackCount" type="number" min="1" max="10" value="1" />
+            <button class="btn subtle" id="btnRollback">Rollback</button>
+          </div>
+          <pre class="json-box mt12" id="taskActionResult"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastHost" class="toast-host"></div>
+  <div id="imageModal" class="image-modal hidden">
+    <div class="image-modal-card">
+      <div class="card-head">
+        <h2>Screenshot</h2>
+        <button class="btn subtle" id="btnCloseImageModal">Close</button>
+      </div>
+      <img id="screenshotImg" alt="screenshot preview" />
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
+
