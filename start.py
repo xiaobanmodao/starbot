@@ -59,6 +59,9 @@ REQUIRED_DIRS = [
     "skills",
 ]
 
+_UV_DISABLED_FOR_SESSION = False
+_UV_DISABLED_REASON = ""
+
 
 def print_banner() -> None:
     """Print a simple startup banner."""
@@ -77,11 +80,19 @@ def print_banner() -> None:
     print()
 
 
-def _installer() -> list[str]:
-    """Return the installer command prefix (uv pip install or pip install)."""
-    if shutil.which("uv"):
-        return ["uv", "pip", "install"]
-    return [sys.executable, "-m", "pip", "install"]
+def _install_mode() -> str:
+    """
+    Return installer mode for dependency bootstrap/install.
+
+    Env var: STARBOT_INSTALLER = pip | auto | uv
+    - pip  (default): always use python -m pip
+    - auto          : try uv first, then fallback to pip
+    - uv            : prefer uv first, but still fallback to pip on failure
+    """
+    raw = os.environ.get("STARBOT_INSTALLER", "pip").strip().lower()
+    if raw in {"pip", "auto", "uv"}:
+        return raw
+    return "pip"
 
 
 def _can_import(name: str) -> bool:
@@ -94,13 +105,20 @@ def _can_import(name: str) -> bool:
 
 def _pip_install(packages: list[str]) -> bool:
     """Install pip packages and return whether the install succeeded."""
+    global _UV_DISABLED_FOR_SESSION, _UV_DISABLED_REASON
     if not packages:
         return True
+
     cmds: list[list[str]] = []
-    uv_path = shutil.which("uv")
-    if uv_path:
-        cmds.append(["uv", "pip", "install"] + packages)
-    cmds.append([sys.executable, "-m", "pip", "install"] + packages)
+    mode = _install_mode()
+    uv_path = None if _UV_DISABLED_FOR_SESSION else shutil.which("uv")
+    pip_cmd = [sys.executable, "-m", "pip", "install"] + packages
+    uv_cmd = ["uv", "pip", "install"] + packages
+
+    if mode in {"auto", "uv"} and uv_path:
+        cmds.append(uv_cmd)
+    # Always keep a pip fallback; this avoids uv policy / runtime issues blocking startup.
+    cmds.append(pip_cmd)
 
     last_err_text = ""
     for idx, cmd in enumerate(cmds):
@@ -111,8 +129,14 @@ def _pip_install(packages: list[str]) -> bool:
             if idx < len(cmds) - 1:
                 if getattr(e, "winerror", None) == 4551:
                     print(f"  warning: {label} is blocked by application control policy, falling back...")
+                    if label == "uv":
+                        _UV_DISABLED_FOR_SESSION = True
+                        _UV_DISABLED_REASON = "blocked by application control policy"
                 else:
                     print(f"  warning: failed to launch {label} installer ({e}), falling back...")
+                    if label == "uv":
+                        _UV_DISABLED_FOR_SESSION = True
+                        _UV_DISABLED_REASON = str(e)
                 continue
             last_err_text = str(e)
             break
@@ -123,6 +147,9 @@ def _pip_install(packages: list[str]) -> bool:
         last_err_text = (r.stderr or r.stdout or "").strip()[:800]
         if idx < len(cmds) - 1:
             print(f"  warning: {label} install failed, trying fallback installer...")
+            if label == "uv":
+                _UV_DISABLED_FOR_SESSION = True
+                _UV_DISABLED_REASON = "non-zero exit"
             continue
 
     print(f"  ERROR install failed:\n{last_err_text}")
