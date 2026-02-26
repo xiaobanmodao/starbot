@@ -139,10 +139,36 @@ class MemoryStore:
             with self._lock:
                 self._con.execute("DELETE FROM memories WHERE id=?", (memory_id,))
                 self._con.commit()
+            self._pref_cache_time = 0
             return True
         except sqlite3.Error as e:
             log.debug("memory delete error: %s", e)
             return False
+
+    def delete_by_category(self, category: str) -> int:
+        """Delete all memories in a category. Returns number of rows deleted."""
+        try:
+            with self._lock:
+                cur = self._con.execute("DELETE FROM memories WHERE category=?", (category,))
+                self._con.commit()
+            self._pref_cache_time = 0
+            return cur.rowcount
+        except sqlite3.Error as e:
+            log.debug("memory delete_by_category error: %s", e)
+            return 0
+
+    def clear_all(self) -> int:
+        """Delete ALL memories. Returns number of rows deleted."""
+        try:
+            with self._lock:
+                cur = self._con.execute("DELETE FROM memories")
+                self._con.commit()
+            self._pref_cache = []
+            self._pref_cache_time = 0
+            return cur.rowcount
+        except sqlite3.Error as e:
+            log.debug("memory clear_all error: %s", e)
+            return 0
 
     def list_by_category(self, category: str = "", limit: int = 20) -> list[dict]:
         """Return memories filtered by category (or all if empty), newest first."""

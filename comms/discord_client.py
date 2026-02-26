@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 import importlib.util
+import threading
 import psutil
 from pathlib import Path
 from datetime import datetime
@@ -1602,6 +1603,25 @@ def start_discord():
     proxy = config.DISCORD_PROXY or None
     client = StarBotClient(intents=intents, proxy=proxy)
     client.run(config.DISCORD_BOT_TOKEN)
+
+
+def start_discord_background() -> threading.Thread | None:
+    """在 daemon 线程中启动 Discord bot，返回线程对象。token 未配置则返回 None。"""
+    token = config.DISCORD_BOT_TOKEN
+    if not token:
+        return None
+
+    def _run():
+        try:
+            proxy = config.DISCORD_PROXY or None
+            client = StarBotClient(intents=intents, proxy=proxy)
+            client.run(token)
+        except Exception as e:
+            log.warning("Discord bot stopped: %s", e)
+
+    t = threading.Thread(target=_run, daemon=True, name="starbot-discord")
+    t.start()
+    return t
 
 
 if __name__ == "__main__":

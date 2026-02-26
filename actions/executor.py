@@ -285,9 +285,11 @@ TOOLS_SCHEMA = [
             "name": "memory_save",
             "description": (
                 "Save information to long-term memory.\n"
-                "Categories: preference(用户偏好), knowledge(知识/笔记), "
+                "Categories: preference(用户偏好/习惯/风格), knowledge(知识/笔记), "
                 "project(项目信息), experience(技术经验), bug(踩坑记录), todo(待办事项)\n"
-                "importance 1-10: 越重要越高（默认5），重要事项设8-10以便优先检索"
+                "importance 1-10: 越重要越高（默认5），重要事项设8-10以便优先检索\n"
+                "⚠️ 高标准：只保存用户明确要求记住的内容、或对未来真正有价值的偏好/经验。"
+                "临时任务结果、已完成的功能开发、一次性指令禁止保存。"
             ),
             "parameters": {
                 "type": "object",
@@ -319,6 +321,35 @@ TOOLS_SCHEMA = [
                     "limit": {"type": "integer"},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_delete",
+            "description": (
+                "Delete memories. Use to clean up stale/outdated entries.\n"
+                "- by_id: 删除单条（id 必填）\n"
+                "- by_category: 删除整个分类（category 必填）\n"
+                "- clear_all: 清空全部记忆（需用户明确授权）"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["by_id", "by_category", "clear_all"],
+                        "description": "删除模式",
+                    },
+                    "id": {"type": "integer", "description": "记忆 ID（mode=by_id 时必填）"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "knowledge", "project", "experience", "bug", "todo"],
+                        "description": "分类（mode=by_category 时必填）",
+                    },
+                },
+                "required": ["mode"],
             },
         },
     },
@@ -820,7 +851,16 @@ def execute(action: dict) -> dict:
     name = action["name"]
     args = action.get("arguments", {})
     if isinstance(args, str):
-        args = json.loads(args)
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            # Try to fix common LLM JSON issues: trailing commas, unquoted values
+            cleaned = re.sub(r',\s*}', '}', args)
+            cleaned = re.sub(r',\s*]', ']', cleaned)
+            try:
+                args = json.loads(cleaned)
+            except json.JSONDecodeError as e:
+                return {"ok": False, "result": f"Invalid tool arguments JSON: {e}"}
 
     # 坐标越界检查
     if name in ("click", "double_click", "move_to", "scroll"):
@@ -1089,6 +1129,25 @@ def _do_execute(name: str, args: dict) -> dict:
             # 只返回 category 和 content，去掉 created_at 等无用字段
             out = "\n---\n".join(f"[{r['category']}] {r['content']}" for r in results)
             return {"ok": True, "result": out}
+
+        elif name == "memory_delete":
+            mode = args.get("mode", "by_id")
+            if mode == "by_id":
+                mid = int(args.get("id", 0))
+                if not mid:
+                    return {"ok": False, "result": "id 参数缺失"}
+                ok = _memory.delete_by_id(mid)
+                return {"ok": ok, "result": f"已删除记忆 #{mid}" if ok else f"记忆 #{mid} 不存在"}
+            elif mode == "by_category":
+                cat = args.get("category", "")
+                if not cat:
+                    return {"ok": False, "result": "category 参数缺失"}
+                n = _memory.delete_by_category(cat)
+                return {"ok": True, "result": f"已删除 {cat} 分类下 {n} 条记忆"}
+            elif mode == "clear_all":
+                n = _memory.clear_all()
+                return {"ok": True, "result": f"已清空全部记忆，共删除 {n} 条"}
+            return {"ok": False, "result": f"未知 mode: {mode}"}
 
         elif name == "bg_task":
             tid = _task_mgr.launch(args["name"], args["prompt"],
