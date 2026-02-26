@@ -17,6 +17,9 @@ starbot_memory.db-shm
 starbot_memory.db-wal
 starbot_state.json
 
+# User-installed skills (keep out of repo)
+skills_ext/
+
 # uv / pyenv
 .python-version
 uv.lock
@@ -25,3 +28,10 @@ uv.lock
 nul
 ~/
 *.exe
+
+# Test temp directories
+.test_tmp/
+test_tmp_work/
+
+# Node
+node_modules/
