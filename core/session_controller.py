@@ -96,9 +96,9 @@ class SessionController:
         self._cancel.set()
         self._emit("status", text="Cancellation requested")
 
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str, attachments: list[dict] | None = None) -> bool:
         message = (text or "").strip()
-        if not message:
+        if not message and not attachments:
             return False
         with self._lock:
             if self.is_busy:
@@ -106,7 +106,7 @@ class SessionController:
             self._cancel.clear()
             self._worker = threading.Thread(
                 target=self._run_worker,
-                args=(message,),
+                args=(message, attachments),
                 daemon=True,
                 name="starbot-session-worker",
             )
@@ -149,13 +149,28 @@ class SessionController:
             if names:
                 self._emit("tool_call", names=names, count=len(names))
 
-    def _run_worker(self, user_text: str):
+    def _run_worker(self, user_text: str, attachments: list[dict] | None = None):
         self._emit("busy", value=True)
         self._emit("user", text=user_text)
         try:
             brain = self._ensure_brain()
-            brain._append_user(user_text)
+            brain._append_user(user_text, attachments=attachments)
             self._emit("status", text="Thinking...")
+
+            _stream_started = False
+
+            def _on_chunk(delta: str):
+                nonlocal _stream_started
+                if not _stream_started:
+                    _stream_started = True
+                    self._emit("stream_start")
+                self._emit("stream_delta", text=delta)
+
+            def _on_clear():
+                nonlocal _stream_started
+                if _stream_started:
+                    self._emit("stream_clear")
+                    _stream_started = False
 
             for step_index in range(1, self._max_steps + 1):
                 if self._cancel.is_set():
@@ -163,10 +178,16 @@ class SessionController:
                     self._emit("status", text="Cancelled")
                     break
 
+                _stream_started = False
+
                 before_count = len(getattr(brain, "messages", []) or [])
-                result = brain.step()
+                result = brain.step_stream(on_chunk=_on_chunk, on_clear=_on_clear)
                 after_count = len(getattr(brain, "messages", []) or [])
                 self._emit_tool_calls_from_delta(before_count, after_count)
+
+                if _stream_started:
+                    self._emit("stream_end")
+                    _stream_started = False
 
                 if result is None:
                     self._emit("status", text="No response")
@@ -176,8 +197,10 @@ class SessionController:
                 # Plain assistant text (no tool call)
                 if isinstance(result, dict) and "text" in result and "name" not in result:
                     text = str(result.get("text", "") or "").strip()
-                    if text:
+                    if text and not result.get("streamed"):
+                        # Not streamed — emit full text at once
                         self._emit("assistant", text=text, final=True)
+                    # If streamed, the text was already delivered via stream_delta events
                     self._emit("done", reason="assistant_text")
                     self._emit("status", text="Completed")
                     break
@@ -193,9 +216,6 @@ class SessionController:
                         step=step_index,
                     )
                     if result.get("done"):
-                        final_text = summary.strip()
-                        if final_text:
-                            self._emit("assistant", text=final_text, final=True)
                         self._emit("done", reason="done_tool")
                         self._emit("status", text="Completed")
                         break

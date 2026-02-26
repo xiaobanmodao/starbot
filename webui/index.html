@@ -7,27 +7,50 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <div class="window-frame">
+    <!-- Resize handles (invisible, on top of everything) -->
+    <div class="resize-handle rh-top" data-edge="3"></div>
+    <div class="resize-handle rh-bottom" data-edge="6"></div>
+    <div class="resize-handle rh-left" data-edge="1"></div>
+    <div class="resize-handle rh-right" data-edge="2"></div>
+    <div class="resize-handle rh-top-left" data-edge="4"></div>
+    <div class="resize-handle rh-top-right" data-edge="5"></div>
+    <div class="resize-handle rh-bottom-left" data-edge="7"></div>
+    <div class="resize-handle rh-bottom-right" data-edge="8"></div>
+
+    <div class="window-titlebar pywebview-drag-region" id="windowTitlebar">
+      <span class="titlebar-title" data-i18n="brand.name">Starbot</span>
+      <div class="titlebar-controls">
+        <button class="titlebar-btn minimize" id="btnWinMinimize" title="Minimize">
+          <svg viewBox="0 0 10 1" fill="none" stroke="currentColor" stroke-width="1.2"><line x1="0" y1="0.5" x2="10" y2="0.5"/></svg>
+        </button>
+        <button class="titlebar-btn maximize" id="btnWinMaximize" title="Maximize">
+          <svg viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="0.5" y="0.5" width="8" height="8" rx="1.5"/></svg>
+        </button>
+        <button class="titlebar-btn close" id="btnWinClose" title="Close">
+          <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="app-shell">
     <aside class="side-rail">
       <div class="brand">
         <div class="brand-mark">SB</div>
         <div>
-          <h1>Starbot</h1>
-          <p>Control Center</p>
+          <h1 data-i18n="brand.name">Starbot</h1>
+          <p data-i18n="brand.tagline">Control Center</p>
         </div>
       </div>
       <nav class="nav-tabs" id="navTabs">
-        <button class="nav-tab active" data-view="chat">Chat</button>
-        <button class="nav-tab" data-view="commands">Command Center</button>
-        <button class="nav-tab" data-view="doctor">Doctor</button>
-        <button class="nav-tab" data-view="config">Config</button>
-        <button class="nav-tab" data-view="skills">Skills</button>
-        <button class="nav-tab" data-view="memory">Memory</button>
-        <button class="nav-tab" data-view="tasks">Tasks</button>
+        <button class="nav-tab active" data-view="chat" data-i18n="nav.chat">Home</button>
+        <button class="nav-tab" data-view="doctor" data-i18n="nav.doctor">Doctor</button>
+        <button class="nav-tab" data-view="config" data-i18n="nav.config">Config</button>
+        <button class="nav-tab" data-view="skills" data-i18n="nav.skills">Skills</button>
+        <button class="nav-tab" data-view="tasks" data-i18n="nav.tasks">Tasks</button>
       </nav>
       <div class="side-footer">
-        <p>Discord mode remains available.</p>
-        <p class="muted">This UI is an additional local client.</p>
+        <p data-i18n="footer.discord">Discord mode remains available.</p>
+        <p class="muted" data-i18n="footer.hint">This UI is an additional local client.</p>
       </div>
     </aside>
 
@@ -37,118 +60,131 @@
           <span class="status-dot" id="sessionBusyDot"></span>
           <span id="sessionBusyText">Idle</span>
           <span class="divider"></span>
-          <span id="modelLabel">Model: -</span>
+          <div class="model-picker" id="modelPicker">
+            <button class="model-btn" id="btnModelPicker">
+              <span id="modelLabel">Model: -</span>
+              <span class="model-caret">▾</span>
+            </button>
+            <div class="model-dropdown hidden" id="modelDropdown">
+              <div class="model-dropdown-loading" id="modelDropdownLoading" data-i18n="model.loading">加载中...</div>
+              <div id="modelDropdownList"></div>
+            </div>
+          </div>
         </div>
         <div class="top-actions">
-          <button class="btn subtle" id="btnQuickStatus">Refresh Status</button>
-          <button class="btn subtle" id="btnQuickDoctor">Doctor</button>
-          <button class="btn" id="btnOpenScreenshot">Screenshot</button>
+          <button class="btn subtle" id="btnChatReset" data-i18n="chat.newSession">New Session</button>
+          <button class="btn subtle danger" id="btnChatStop" data-i18n="chat.stop">Stop</button>
+          <button class="btn subtle" id="btnQuickStatus" data-i18n="top.refreshStatus">Refresh Status</button>
+          <button class="btn subtle" id="btnQuickDoctor" data-i18n="top.doctor">Doctor</button>
+          <button class="btn primary" id="btnOpenScreenshot" data-i18n="top.screenshot">Screenshot</button>
         </div>
       </header>
 
       <section class="view active" id="view-chat">
-        <div class="grid two-col">
-          <section class="card tall">
-            <div class="card-head">
-              <h2>Conversation</h2>
-              <div class="inline-actions">
-                <button class="btn subtle" id="btnChatReset">New Session</button>
-                <button class="btn subtle danger" id="btnChatStop">Stop</button>
-              </div>
-            </div>
-            <div class="chat-feed" id="chatFeed"></div>
-            <div class="composer">
-              <textarea id="chatInput" placeholder="输入任务或问题。支持普通对话和复杂任务..." rows="4"></textarea>
-              <div class="composer-actions">
-                <span class="muted">Ctrl/Cmd + Enter 发送</span>
-                <button class="btn primary" id="btnChatSend">Send</button>
-              </div>
-            </div>
-          </section>
-
-          <section class="stack">
-            <section class="card half">
-              <div class="card-head">
-                <h2>Run Log</h2>
-                <button class="btn subtle" id="btnClearEventLog">Clear</button>
-              </div>
-              <pre class="log-box" id="eventLog"></pre>
-            </section>
-            <section class="card half">
-              <div class="card-head">
-                <h2>Session Usage</h2>
-              </div>
-              <div class="stats-grid" id="usageStats">
-                <div class="stat"><label>Input</label><strong id="usageInput">0</strong></div>
-                <div class="stat"><label>Output</label><strong id="usageOutput">0</strong></div>
-                <div class="stat"><label>Calls</label><strong id="usageCalls">0</strong></div>
-              </div>
-              <div class="hint-list">
-                <p>最终回答显示在左侧聊天区。</p>
-                <p>工具调用和过程日志显示在这里，不会混入最终回答。</p>
-              </div>
-            </section>
-          </section>
-        </div>
-      </section>
-
-      <section class="view" id="view-commands">
-        <div class="grid two-col">
-          <section class="card">
-            <div class="card-head">
-              <h2>Command Console</h2>
-              <button class="btn subtle" id="btnLoadHelp">Load Help</button>
-            </div>
-            <p class="muted mb12">执行与 Discord 文本命令一致的命令（如 <code>/doctor</code>、<code>/skill list</code>、<code>/memory stats</code>、<code>/config LLM_MODEL xxx</code>）。</p>
-            <textarea id="commandInput" rows="4" placeholder="/doctor"></textarea>
-            <div class="inline-actions mt12">
-              <button class="btn primary" id="btnRunCommand">Run Command</button>
-            </div>
-          </section>
-
-          <section class="card">
-            <div class="card-head">
-              <h2>Command Result</h2>
-              <button class="btn subtle" id="btnCopyCommandResult">Copy JSON</button>
-            </div>
-            <pre class="json-box" id="commandResult"></pre>
-          </section>
+        <div class="chat-feed" id="chatFeed"></div>
+        <div class="composer-float">
+          <div class="composer-attachments" id="composerAttachments"></div>
+          <div class="composer-row">
+            <button class="composer-icon-btn" id="btnAttach" title="上传文件">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <textarea id="chatInput" placeholder="输入任务或问题。支持普通对话和复杂任务..." rows="1" data-i18n="chat.placeholder"></textarea>
+            <button class="composer-send-btn" id="btnChatSend" title="发送 (Ctrl+Enter)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+          </div>
+          <input type="file" id="fileInput" multiple hidden accept="image/*,.txt,.py,.js,.json,.md,.csv,.log,.xml,.yaml,.yml,.html,.css,.ts,.tsx,.jsx,.java,.c,.cpp,.h,.rs,.go,.rb,.php,.sh,.bat,.sql,.toml,.ini,.cfg" />
         </div>
       </section>
 
       <section class="view" id="view-doctor">
-        <div class="grid three-col">
+        <div class="doctor-scroll">
+          <div class="grid three-col">
+            <section class="card">
+              <div class="card-head"><h2 data-i18n="doctor.runtime">Runtime</h2><button class="btn subtle" id="btnRefreshDoctor" data-i18n="doctor.refresh">Refresh</button></div>
+              <div id="doctorRuntime" class="list-block"></div>
+            </section>
+            <section class="card">
+              <div class="card-head"><h2 data-i18n="doctor.config">Config Checks</h2></div>
+              <div id="doctorConfigChecks" class="list-block"></div>
+            </section>
+            <section class="card">
+              <div class="card-head"><h2 data-i18n="doctor.features">Feature Availability</h2></div>
+              <div id="doctorFeatures" class="list-block"></div>
+            </section>
+          </div>
           <section class="card">
-            <div class="card-head"><h2>Runtime</h2><button class="btn subtle" id="btnRefreshDoctor">Refresh</button></div>
-            <div id="doctorRuntime" class="list-block"></div>
+            <div class="card-head"><h2 data-i18n="doctor.components">Recommended Components</h2></div>
+            <div id="doctorChecksTable" class="table-wrap"></div>
           </section>
+          <div class="grid two-col">
+            <section class="card">
+              <div class="card-head">
+                <h2 data-i18n="cmd.title">Command Console</h2>
+                <button class="btn subtle" id="btnLoadHelp" data-i18n="cmd.loadHelp">Load Help</button>
+              </div>
+              <p class="muted mb12" data-i18n="cmd.desc">执行与 Discord 文本命令一致的命令（如 /doctor、/skill list、/memory stats、/config LLM_MODEL xxx）。</p>
+              <textarea id="commandInput" rows="3" placeholder="/doctor"></textarea>
+              <div class="inline-actions mt12">
+                <button class="btn primary" id="btnRunCommand" data-i18n="cmd.run">Run Command</button>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h2 data-i18n="cmd.result">Command Result</h2>
+                <button class="btn subtle" id="btnCopyCommandResult" data-i18n="cmd.copy">Copy JSON</button>
+              </div>
+              <pre class="json-box" id="commandResult"></pre>
+            </section>
+          </div>
           <section class="card">
-            <div class="card-head"><h2>Config Checks</h2></div>
-            <div id="doctorConfigChecks" class="list-block"></div>
-          </section>
-          <section class="card">
-            <div class="card-head"><h2>Feature Availability</h2></div>
-            <div id="doctorFeatures" class="list-block"></div>
+            <div class="card-head">
+              <h2 data-i18n="doctor.runLog">Run Log</h2>
+              <div class="inline-actions">
+                <button class="btn subtle" id="btnCopyEventLog" data-i18n="doctor.copyLog">Copy Log</button>
+                <button class="btn subtle" id="btnClearEventLog" data-i18n="doctor.clearLog">Clear</button>
+              </div>
+            </div>
+            <pre class="log-box" id="eventLog"></pre>
           </section>
         </div>
-        <section class="card mt14">
-          <div class="card-head"><h2>Recommended Components</h2></div>
-          <div id="doctorChecksTable" class="table-wrap"></div>
-        </section>
       </section>
 
       <section class="view" id="view-config">
-        <div class="card">
-          <div class="card-head">
-            <h2>Configuration</h2>
-            <div class="inline-actions">
-              <button class="btn subtle" id="btnReloadConfig">Reload</button>
-              <button class="btn primary" id="btnSaveConfig">Save Selected Fields</button>
+        <div class="config-scroll">
+          <section class="card">
+            <div class="card-head">
+              <h2 data-i18n="pref.title">界面偏好</h2>
             </div>
-          </div>
-          <p class="muted mb12">可在此修改核心配置。敏感值显示为脱敏状态；如需更新，请直接输入新值覆盖。</p>
-          <div class="form-grid" id="configForm"></div>
-          <div class="form-note">保存会写入 `.env`（`LLM_MODEL` 同时写入运行态 state）。Discord 功能保持不变。</div>
+            <div class="pref-grid">
+              <div class="pref-item">
+                <span class="label" data-i18n="pref.language">语言 / Language</span>
+                <div class="seg-control" id="langPicker">
+                  <button class="seg-btn active" data-lang="zh">简体中文</button>
+                  <button class="seg-btn" data-lang="en">English</button>
+                </div>
+              </div>
+              <div class="pref-item">
+                <span class="label" data-i18n="pref.theme">配色主题</span>
+                <div class="seg-control" id="themePicker">
+                  <button class="seg-btn active" data-theme-val="dark" data-i18n="pref.dark">暗色</button>
+                  <button class="seg-btn" data-theme-val="light" data-i18n="pref.light">亮色</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-head">
+              <h2 data-i18n="config.title">Configuration</h2>
+              <div class="inline-actions">
+                <button class="btn subtle" id="btnReloadConfig" data-i18n="config.reload">Reload</button>
+                <button class="btn primary" id="btnSaveConfig" data-i18n="config.save">Save Selected Fields</button>
+              </div>
+            </div>
+            <p class="muted mb12" data-i18n="config.desc">可在此修改核心配置。敏感值显示为脱敏状态；如需更新，请直接输入新值覆盖。</p>
+            <div class="form-grid" id="configForm"></div>
+            <div class="form-note" data-i18n="config.note">保存会写入 .env（LLM_MODEL 同时写入运行态 state）。Discord 功能保持不变。</div>
+          </section>
         </div>
       </section>
 
@@ -156,61 +192,29 @@
         <div class="grid two-col">
           <section class="card">
             <div class="card-head">
-              <h2>Skills</h2>
+              <h2 data-i18n="skills.title">Skills</h2>
               <div class="inline-actions">
-                <button class="btn subtle" id="btnReloadSkills">Reload</button>
-                <button class="btn subtle" id="btnRefreshSkills">Refresh</button>
+                <button class="btn subtle" id="btnReloadSkills" data-i18n="skills.reload">Reload</button>
+                <button class="btn subtle" id="btnRefreshSkills" data-i18n="skills.refresh">Refresh</button>
               </div>
             </div>
             <div id="skillsTable" class="table-wrap"></div>
           </section>
           <section class="card">
-            <div class="card-head"><h2>Skill Actions</h2></div>
-            <label class="label">Install source (URL / local path)</label>
+            <div class="card-head"><h2 data-i18n="skills.actions">Skill Actions</h2></div>
+            <label class="label" data-i18n="skills.install">Install source (URL / local path)</label>
             <input id="skillInstallSource" type="text" placeholder="https://skillsmp.com/skills/..." />
-            <button class="btn primary mt12" id="btnSkillInstall">Install</button>
+            <button class="btn primary mt12" id="btnSkillInstall" data-i18n="skills.installBtn">Install</button>
 
             <div class="divider-line"></div>
-            <label class="label">Skill name</label>
-            <input id="skillNameAction" type="text" placeholder="Skill name" />
+            <label class="label" data-i18n="skills.skillName">Skill name</label>
+            <input id="skillNameAction" type="text" data-i18n="skills.skillName" placeholder="Skill name" />
             <div class="inline-actions mt12 wrap">
-              <button class="btn subtle" id="btnSkillInfo">Info</button>
-              <button class="btn subtle" id="btnSkillUpdate">Update</button>
-              <button class="btn subtle danger" id="btnSkillRemove">Remove</button>
+              <button class="btn subtle" id="btnSkillInfo" data-i18n="skills.info">Info</button>
+              <button class="btn subtle" id="btnSkillUpdate" data-i18n="skills.update">Update</button>
+              <button class="btn subtle danger" id="btnSkillRemove" data-i18n="skills.remove">Remove</button>
             </div>
             <pre class="json-box mt12" id="skillActionResult"></pre>
-          </section>
-        </div>
-      </section>
-
-      <section class="view" id="view-memory">
-        <div class="grid two-col">
-          <section class="card">
-            <div class="card-head">
-              <h2>Memory Browser</h2>
-              <div class="inline-actions">
-                <button class="btn subtle" id="btnMemoryStats">Stats</button>
-                <button class="btn subtle" id="btnMemoryRefresh">Refresh</button>
-              </div>
-            </div>
-            <div class="inline-controls">
-              <input id="memoryCategory" type="text" placeholder="Category (blank = all)" />
-              <button class="btn subtle" id="btnMemoryList">List</button>
-            </div>
-            <div id="memoryListTable" class="table-wrap mt12"></div>
-          </section>
-          <section class="card">
-            <div class="card-head"><h2>Memory Search / Delete</h2></div>
-            <label class="label">Search query</label>
-            <input id="memorySearchQuery" type="text" placeholder="关键词 / keywords" />
-            <button class="btn primary mt12" id="btnMemorySearch">Search</button>
-            <div id="memorySearchTable" class="table-wrap mt12"></div>
-
-            <div class="divider-line"></div>
-            <label class="label">Delete memory ID</label>
-            <input id="memoryDeleteId" type="number" placeholder="123" />
-            <button class="btn subtle danger mt12" id="btnMemoryDelete">Delete</button>
-            <pre class="json-box mt12" id="memoryActionResult"></pre>
           </section>
         </div>
       </section>
@@ -218,28 +222,29 @@
       <section class="view" id="view-tasks">
         <div class="card">
           <div class="card-head">
-            <h2>Background Tasks</h2>
-            <button class="btn subtle" id="btnRefreshTasks">Refresh</button>
+            <h2 data-i18n="tasks.title">Background Tasks</h2>
+            <button class="btn subtle" id="btnRefreshTasks" data-i18n="tasks.refresh">Refresh</button>
           </div>
           <div id="tasksTable" class="table-wrap"></div>
           <div class="divider-line"></div>
-          <label class="label">Rollback recent file operations</label>
+          <label class="label" data-i18n="tasks.rollback">Rollback recent file operations</label>
           <div class="inline-controls">
             <input id="rollbackCount" type="number" min="1" max="10" value="1" />
-            <button class="btn subtle" id="btnRollback">Rollback</button>
+            <button class="btn subtle" id="btnRollback" data-i18n="tasks.rollbackBtn">Rollback</button>
           </div>
           <pre class="json-box mt12" id="taskActionResult"></pre>
         </div>
       </section>
     </main>
-  </div>
+  </div><!-- /app-shell -->
+  </div><!-- /window-frame -->
 
   <div id="toastHost" class="toast-host"></div>
   <div id="imageModal" class="image-modal hidden">
     <div class="image-modal-card">
       <div class="card-head">
-        <h2>Screenshot</h2>
-        <button class="btn subtle" id="btnCloseImageModal">Close</button>
+        <h2 data-i18n="screenshot.title">Screenshot</h2>
+        <button class="btn subtle" id="btnCloseImageModal" data-i18n="screenshot.close">Close</button>
       </div>
       <img id="screenshotImg" alt="screenshot preview" />
     </div>
@@ -248,4 +253,3 @@
   <script src="/app.js"></script>
 </body>
 </html>
-

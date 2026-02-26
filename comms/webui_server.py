@@ -130,7 +130,9 @@ class _ApiHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
 
         if path == "/api/chat/send":
-            return self._send_json(self.service.send_chat(str(payload.get("text", ""))))
+            text = str(payload.get("text", ""))
+            attachments = payload.get("attachments") or []
+            return self._send_json(self.service.send_chat(text, attachments=attachments))
         if path == "/api/chat/stop":
             return self._send_json(self.service.stop_chat())
         if path == "/api/chat/reset":

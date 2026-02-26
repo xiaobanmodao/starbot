@@ -170,10 +170,10 @@ class LocalClientService:
 
     # ------------------------------------------------------------------ chat/session
 
-    def send_chat(self, text: str) -> dict:
+    def send_chat(self, text: str, *, attachments: list[dict] | None = None) -> dict:
         if self.controller.is_busy:
             return self._result(False, message="Session is busy. Stop current task first.", code="busy")
-        if not self.controller.send_message(text):
+        if not self.controller.send_message(text, attachments=attachments):
             return self._result(False, message="Empty message or failed to queue.", code="send_failed")
         return self._result(True, message="Queued", data={"queued": True})
 
@@ -371,6 +371,11 @@ class LocalClientService:
         if not model:
             return self._result(False, message="Model name is required", code="invalid")
         self._set_config_value("LLM_MODEL", model)
+        # Update running Brain's LLM model so the switch takes effect immediately
+        if self.controller.has_session():
+            brain = getattr(self.controller, "_brain", None)
+            if brain and hasattr(brain, "llm"):
+                brain.llm.model = model
         return self._result(True, message=f"Model switched to {model}", data={"current": model})
 
     def config_get(self) -> dict:
