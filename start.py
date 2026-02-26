@@ -310,6 +310,49 @@ def check_dirs() -> None:
     print()
 
 
+def check_node_and_electron() -> bool:
+    """Check Node.js availability and ensure Electron is installed in desktop/."""
+    print("[*] Node.js & Electron")
+
+    node = shutil.which("node")
+    if not node:
+        print("  ERROR  Node.js not found. Please install Node.js >= 18 (https://nodejs.org/).")
+        return False
+
+    # Show Node version
+    try:
+        r = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10)
+        print(f"  OK  Node.js {r.stdout.strip()}")
+    except Exception:
+        print("  OK  Node.js found")
+
+    npx = shutil.which("npx")
+    if not npx:
+        print("  ERROR  npx not found. Please install Node.js >= 18 (https://nodejs.org/).")
+        return False
+    print(f"  OK  npx")
+
+    desktop_dir = os.path.join(_DIR, "desktop")
+    nm = os.path.join(desktop_dir, "node_modules")
+    if os.path.isdir(nm):
+        print("  OK  Electron (already installed)")
+    else:
+        npm = shutil.which("npm")
+        if not npm:
+            print("  ERROR  npm not found. Please install Node.js (https://nodejs.org/).")
+            return False
+        print("  Installing Electron (first run, may take a moment)...")
+        try:
+            subprocess.check_call([npm, "install"], cwd=desktop_dir)
+            print("  OK  Electron installed")
+        except subprocess.CalledProcessError as e:
+            print(f"  ERROR  npm install failed: {e}")
+            return False
+
+    print()
+    return True
+
+
 def check_api() -> bool:
     """Validate LLM API config and connectivity."""
     from config import config
@@ -400,20 +443,115 @@ def _run_section(title: str, fn, *args, **kwargs):
     return result
 
 
-def _parse_start_cli(argv: list[str]) -> dict[str, bool]:
+def _parse_start_cli(argv: list[str]) -> dict:
     """Minimal CLI flags for startup/setup workflows."""
-    opts = {"force_setup": False, "setup_only": False}
-    for raw in argv:
-        arg = (raw or "").strip().lower()
-        if arg in {"setup", "config"}:
+    opts: dict = {
+        "force_setup": False,
+        "setup_only": False,
+        "mode": None,       # None (default: desktop+discord) | "discord" (discord-only)
+        "host": "127.0.0.1",
+        "port": 8765,
+    }
+    i = 0
+    while i < len(argv):
+        raw = argv[i]
+        arg = (raw or "").strip()
+        low = arg.lower()
+        if low in {"setup", "config"}:
             opts["force_setup"] = True
             opts["setup_only"] = True
-        elif arg in {"--setup", "--config", "--wizard"}:
+        elif low in {"--setup", "--config", "--wizard"}:
             opts["force_setup"] = True
-        elif arg in {"--setup-only", "--config-only", "--wizard-only"}:
+        elif low in {"--setup-only", "--config-only", "--wizard-only"}:
             opts["force_setup"] = True
             opts["setup_only"] = True
+        elif low in {"--discord", "discord"}:
+            opts["mode"] = "discord"
+        elif low == "--host" and i + 1 < len(argv):
+            opts["host"] = argv[i + 1]
+            i += 1
+        elif low == "--port" and i + 1 < len(argv):
+            try:
+                opts["port"] = int(argv[i + 1])
+            except ValueError:
+                pass
+            i += 1
+        i += 1
     return opts
+
+
+def _launch_discord_only(cli: dict) -> None:
+    """Start Discord-only mode (no desktop). Kept as --discord fallback."""
+    if not _run_section("LLM API connectivity", check_api):
+        input("\nPress Enter to exit...")
+        sys.exit(1)
+    if not _run_section("Discord configuration", check_discord):
+        input("\nPress Enter to exit...")
+        sys.exit(1)
+
+    reset = "\033[0m"
+    blue = "\033[94m"
+    white = "\033[97m"
+    cyan = "\033[96m"
+    bar = "=" * 62
+    print(f"\n  {blue}{bar}{reset}")
+    print(f"  {cyan}  * {white}Starbot is connecting to Discord...{cyan} *{reset}")
+    print(f"  {blue}{bar}{reset}\n")
+
+    from comms.discord_client import start_discord
+    start_discord()
+
+
+def _launch_desktop(cli: dict) -> None:
+    """Start Electron desktop mode with optional Discord background connection."""
+    import subprocess as _sp
+
+    npx = shutil.which("npx")
+    desktop_dir = os.path.join(_DIR, "desktop")
+
+    from comms.webui_server import WebUiServer
+
+    host = str(cli["host"])
+    port = int(cli["port"])
+    server = WebUiServer(host=host, port=port)
+    server.start()
+
+    print(f"  Desktop UI local service: {server.url}")
+
+    # --- Discord background connection ---
+    gray = "\033[90m"
+    reset = "\033[0m"
+    from comms.discord_client import start_discord_background
+    discord_thread = start_discord_background()
+    if discord_thread:
+        print(f"  Discord bot connecting in background...")
+    else:
+        print(f"  {gray}Discord bot skipped (DISCORD_BOT_TOKEN not configured){reset}")
+
+    print("  Close the Electron window to stop.\n")
+
+    electron_proc = None
+    try:
+        electron_proc = _sp.Popen(
+            [npx, "electron", desktop_dir, f"--url=http://{host}:{port}"],
+            cwd=desktop_dir,
+        )
+        electron_proc.wait()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"  ERROR  Failed to start Electron: {e}")
+        input("\nPress Enter to exit...")
+    finally:
+        if electron_proc and electron_proc.poll() is None:
+            electron_proc.terminate()
+        try:
+            server.stop()
+        except Exception:
+            pass
+
+
+# ── main ─────────────────────────────────────────────────────
 
 
 def main():
@@ -425,27 +563,28 @@ def main():
     reset = "\033[0m"
     blue = "\033[94m"
     white = "\033[97m"
-    cyan = "\033[96m"
 
-    def _launch(title: str) -> None:
-        bar = "=" * 62
-        print(f"\n  {blue}{bar}{reset}")
-        print(f"  {cyan}  * {white}{title}{cyan} *{reset}")
-        print(f"  {blue}{bar}{reset}\n")
+    # --- Setup-only shortcut ---
+    if cli["setup_only"]:
+        if not _ensure_bootstrap_deps_for_config():
+            input("\nPress Enter to exit...")
+            sys.exit(1)
+        from config import setup
+        print("  Running configuration wizard only (no startup checks).")
+        print("  Tip: 'Skip / Modify' choices appear for steps that are already fully configured.\n")
+        setup(force=True)
+        return
 
-    print(f"  {blue}>>{white} Startup checks{reset}\n")
+    # --- Startup checks ---
+    mode = cli["mode"]  # None (default=desktop+discord) or "discord" (discord-only)
+    label = "discord" if mode == "discord" else "desktop"
+    print(f"\n  {blue}>>{white} Startup checks ({label}){reset}\n")
 
     if not _ensure_bootstrap_deps_for_config():
         input("\nPress Enter to exit...")
         sys.exit(1)
 
     from config import setup
-
-    if cli["setup_only"]:
-        print("  Running configuration wizard only (no startup checks).")
-        print("  Tip: 'Skip / Modify' choices appear for steps that are already fully configured.\n")
-        setup(force=True)
-        return
 
     if cli["force_setup"]:
         _run_section("Configuration wizard (reconfigure)", setup, True)
@@ -461,17 +600,14 @@ def main():
     _run_section("Skill dependencies", check_skill_deps)
     _run_section("Initialize directories", check_dirs)
 
-    if not _run_section("LLM API connectivity", check_api):
-        input("\nPress Enter to exit...")
-        sys.exit(1)
-    if not _run_section("Discord configuration", check_discord):
-        input("\nPress Enter to exit...")
-        sys.exit(1)
-
-    _launch("Starbot is connecting to Discord...")
-    from comms.discord_client import start_discord
-
-    start_discord()
+    # --- Mode-specific dependency checks & launch ---
+    if mode == "discord":
+        _launch_discord_only(cli)
+    else:
+        if not _run_section("Node.js & Electron", check_node_and_electron):
+            input("\nPress Enter to exit...")
+            sys.exit(1)
+        _launch_desktop(cli)
 
 
 if __name__ == "__main__":

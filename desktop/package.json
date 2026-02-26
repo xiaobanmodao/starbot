@@ -1,0 +1,12 @@
+{
+  "name": "starbot-desktop",
+  "version": "1.0.0",
+  "description": "Starbot Electron desktop shell",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^33.0.0"
+  }
+}

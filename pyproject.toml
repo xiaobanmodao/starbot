@@ -31,6 +31,7 @@ starbot = "start:main"
 [project.optional-dependencies]
 desktop = [
     "pywebview>=5.4",
+    "pystray>=0.19",
 ]
 
 [tool.setuptools]
