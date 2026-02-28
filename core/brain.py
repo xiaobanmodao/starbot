@@ -139,12 +139,20 @@ Output ONLY the JSON block, no other text."""
 
 
 class Brain:
-    def __init__(self, llm: UniversalLLM | None = None, use_native_tools: bool = True, tools_schema: list | None = None):
+    # Tools that require user confirmation before execution
+    DANGEROUS_TOOLS = frozenset({
+        "power", "process_kill", "file_delete", "registry_write",
+        "registry_delete_value", "run_command",
+    })
+
+    def __init__(self, llm: UniversalLLM | None = None, use_native_tools: bool = True, tools_schema: list | None = None,
+                 confirm_callback=None):
         self.llm = llm or UniversalLLM(
             config.LLM_API_KEY, config.LLM_API_BASE, config.LLM_MODEL,
         )
         self.use_native_tools = use_native_tools
         self._tools_schema = tools_schema if tools_schema is not None else TOOLS_SCHEMA
+        self._confirm_callback = confirm_callback
         self._memory = MemoryStore()
         # ReAct: track consecutive tool failures for retry hints
         self._fail_streak: int = 0
@@ -217,25 +225,16 @@ class Brain:
             return None
 
     def _append_user(self, text: str, image_path: str | None = None, attachments: list[dict] | None = None):
-        # On the first user message, inject relevant memories and skill recommendations.
+        # 首条用户消息只注入 Skill 推荐，不再自动拼接 [Relevant Memory] 文本，避免“系统自动加记忆”干扰对话。
         if len(self.messages) == 1 and text and not image_path:
-            blocks: list[str] = []
             try:
                 rec_hint = _skill_manager.build_recommendation_hint(text, limit=3)
             except Exception as e:
                 log.debug("skill recommendation hint failed: %s", e)
                 rec_hint = ""
             if rec_hint:
-                blocks.append(f"[Skill Recommendations]\n{rec_hint}")
-
-            relevant = self._memory.search_multi(text, limit=6)
-            contents = [r["content"] for r in relevant]
-            if contents:
-                mem_block = "\n".join(f"- {m[:200]}" for m in contents)
-                blocks.append(f"[Relevant Memory]\n{mem_block}")
-
-            if blocks:
-                text = "\n\n".join(blocks + [text])
+                # 仅作为隐藏提示放在同一条 user 消息的前缀，供模型参考，不建议在回答中直接复述标签。
+                text = f"[Skill Recommendations]\n{rec_hint}\n\n{text}"
 
         # Process web UI attachments
         content_parts: list[dict] = []
@@ -330,10 +329,11 @@ class Brain:
             return {"text": msg.content}
         return None
 
-    def _call_native_stream(self, on_chunk=None, on_clear=None) -> dict | None:
+    def _call_native_stream(self, on_chunk=None, on_clear=None, cancel_check=None) -> dict | None:
         """Stream version of _call_native. Calls on_chunk(text) with each text delta.
         Calls on_clear() once when tool calls are first detected (LLM switched from
         text to tool-call mode — previously streamed text was just internal planning).
+        cancel_check: callable returning True if cancellation was requested.
         Returns list of tool calls or single text action."""
         self._compress_context()
         try:
@@ -360,6 +360,13 @@ class Brain:
         _tool_call_signalled = False   # 只触发一次 on_clear
 
         for chunk in stream:
+            if cancel_check and cancel_check():
+                # Abort streaming — close the stream and return None
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+                return None
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -441,10 +448,11 @@ class Brain:
             action = self._call_text()
         return self._process_action(action)
 
-    def step_stream(self, on_chunk=None, on_clear=None) -> dict | None:
-        """Stream version of step. Calls on_chunk(text) for each text delta."""
+    def step_stream(self, on_chunk=None, on_clear=None, cancel_check=None) -> dict | None:
+        """Stream version of step. Calls on_chunk(text) for each text delta.
+        cancel_check: callable returning True if cancellation was requested."""
         if self.use_native_tools:
-            action = self._call_native_stream(on_chunk=on_chunk, on_clear=on_clear)
+            action = self._call_native_stream(on_chunk=on_chunk, on_clear=on_clear, cancel_check=cancel_check)
         else:
             action = self._call_text()
         return self._process_action(action, streamed=True)
@@ -464,6 +472,29 @@ class Brain:
         actions = action if isinstance(action, list) else [action]
         results: list[dict] = []
         for one_action in actions:
+            tool_name = one_action.get("name", "")
+
+            # ── Confirmation gate for dangerous tools ─────────────────────
+            if tool_name in self.DANGEROUS_TOOLS and self._confirm_callback:
+                try:
+                    args_str = one_action.get("arguments", "{}")
+                    if isinstance(args_str, str):
+                        display_args = json.loads(args_str)
+                    else:
+                        display_args = args_str
+                except Exception:
+                    display_args = one_action.get("arguments", {})
+                approved = self._confirm_callback(tool_name, display_args)
+                if not approved:
+                    denied_result = {"ok": False, "result": f"用户拒绝执行 {tool_name}"}
+                    if self.use_native_tools:
+                        self._feed_native_result(one_action.get("id", ""), denied_result, None)
+                    else:
+                        self._feed_text_result(denied_result, None)
+                    results.append(denied_result)
+                    continue
+            # ──────────────────────────────────────────────────────────────
+
             result = execute(one_action)
             image_path = result.get("image")
             feed_result = {k: v for k, v in result.items() if k != "image"}

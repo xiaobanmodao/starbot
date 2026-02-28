@@ -5,6 +5,8 @@ const I18N = {
     "nav.config": "配置 & 设置",
     "nav.skills": "技能",
     "nav.tasks": "任务",
+    "sessions.title": "对话列表",
+    "sessions.new": "新建",
     "top.refreshStatus": "刷新状态",
     "top.doctor": "诊断",
     "top.screenshot": "截图",
@@ -157,6 +159,32 @@ const I18N = {
     "screenshot.close": "关闭",
     "misc.yes": "是",
     "misc.no": "否",
+    // Home page
+    "home.welcome": "欢迎使用 Starbot",
+    "home.welcomeDesc": "你的 AI 自动化助手已就绪。开始对话、管理任务，或查看系统状态。",
+    "home.statSessions": "对话会话",
+    "home.statMemories": "记忆条目",
+    "home.statTasks": "后台任务",
+    "home.systemStatus": "系统状态",
+    "home.quickActions": "快速入口",
+    "home.actionNewChat": "新建对话",
+    "home.actionDoctor": "系统诊断",
+    "home.actionSkills": "技能管理",
+    "home.actionTasks": "后台任务",
+    "home.actionConfig": "配置设置",
+    "home.recentSessions": "最近对话",
+    "home.noSessions": "暂无对话记录",
+    "home.statusModel": "当前模型",
+    "home.statusSession": "会话状态",
+    "home.statusProcessing": "处理状态",
+    "home.statusActive": "活跃",
+    "home.statusInactive": "未激活",
+    "home.statusCPU": "CPU 使用率",
+    "home.statusMemory": "内存使用",
+    "home.timeJustNow": "刚刚",
+    "home.timeMinutesAgo": "{0}分钟前",
+    "home.timeHoursAgo": "{0}小时前",
+    "home.timeDaysAgo": "{0}天前",
   },
   en: {
     "nav.chat": "Home",
@@ -164,6 +192,8 @@ const I18N = {
     "nav.config": "Config & Settings",
     "nav.skills": "Skills",
     "nav.tasks": "Tasks",
+    "sessions.title": "Conversations",
+    "sessions.new": "New",
     "top.refreshStatus": "Refresh Status",
     "top.doctor": "Doctor",
     "top.screenshot": "Screenshot",
@@ -316,17 +346,47 @@ const I18N = {
     "screenshot.close": "Close",
     "misc.yes": "yes",
     "misc.no": "no",
+    // Home page
+    "home.welcome": "Welcome to Starbot",
+    "home.welcomeDesc": "Your AI automation assistant is ready. Start conversations, manage tasks, or check system status.",
+    "home.statSessions": "Conversations",
+    "home.statMemories": "Memories",
+    "home.statTasks": "Background Tasks",
+    "home.systemStatus": "System Status",
+    "home.quickActions": "Quick Actions",
+    "home.actionNewChat": "New Chat",
+    "home.actionDoctor": "System Doctor",
+    "home.actionSkills": "Skills",
+    "home.actionTasks": "Tasks",
+    "home.actionConfig": "Settings",
+    "home.recentSessions": "Recent Conversations",
+    "home.noSessions": "No conversation history",
+    "home.statusModel": "Current Model",
+    "home.statusSession": "Session Status",
+    "home.statusProcessing": "Processing Status",
+    "home.statusActive": "Active",
+    "home.statusInactive": "Inactive",
+    "home.statusCPU": "CPU Usage",
+    "home.statusMemory": "Memory Usage",
+    "home.timeJustNow": "Just now",
+    "home.timeMinutesAgo": "{0} minutes ago",
+    "home.timeHoursAgo": "{0} hours ago",
+    "home.timeDaysAgo": "{0} days ago",
   },
 };
 
 const state = {
-  activeView: "chat",
+  activeView: "home",
   seenEventKeys: new Set(),
   chatBusy: false,
   configDraft: {},
   skillItems: [],
+  skillsPage: 1,
+  skillsPageSize: 15,
   currentLang: "zh",
   currentModel: "",
+  currentSessionId: "",
+  sessionItems: [],
 };
 
 const els = {};
@@ -343,6 +403,8 @@ function t(key) {
 function bindElements() {
   Object.assign(els, {
     navTabs: $("navTabs"),
+    btnSessionNew: $("btnSessionNew"),
+    sessionList: $("sessionList"),
     chatFeed: $("chatFeed"),
     eventLog: $("eventLog"),
     chatInput: $("chatInput"),
@@ -371,6 +433,9 @@ function bindElements() {
     btnCloseImageModal: $("btnCloseImageModal"),
     imageModal: $("imageModal"),
     screenshotImg: $("screenshotImg"),
+    deleteConfirmModal: $("deleteConfirmModal"),
+    btnDeleteCancel: $("btnDeleteCancel"),
+    btnDeleteConfirm: $("btnDeleteConfirm"),
     commandInput: $("commandInput"),
     commandResult: $("commandResult"),
     btnRunCommand: $("btnRunCommand"),
@@ -385,6 +450,7 @@ function bindElements() {
     btnReloadConfig: $("btnReloadConfig"),
     btnSaveConfig: $("btnSaveConfig"),
     skillsTable: $("skillsTable"),
+    skillsPager: $("skillsPager"),
     btnReloadSkills: $("btnReloadSkills"),
     btnRefreshSkills: $("btnRefreshSkills"),
     skillInstallSource: $("skillInstallSource"),
@@ -411,6 +477,18 @@ function bindElements() {
     btnRollback: $("btnRollback"),
     taskActionResult: $("taskActionResult"),
     toastHost: $("toastHost"),
+    // Home page elements
+    btnRefreshHome: $("btnRefreshHome"),
+    homeStatSessions: $("homeStatSessions"),
+    homeStatMemories: $("homeStatMemories"),
+    homeStatTasks: $("homeStatTasks"),
+    homeSystemStatus: $("homeSystemStatus"),
+    homeRecentSessions: $("homeRecentSessions"),
+    homeActionNewChat: $("homeActionNewChat"),
+    homeActionDoctor: $("homeActionDoctor"),
+    homeActionSkills: $("homeActionSkills"),
+    homeActionTasks: $("homeActionTasks"),
+    homeActionConfig: $("homeActionConfig"),
   });
 }
 
@@ -438,6 +516,45 @@ function showToast(text, level = "ok") {
     div.addEventListener("animationend", () => div.remove(), { once: true });
     setTimeout(() => div.remove(), 300);
   }, 2400);
+}
+
+function showDeleteConfirm() {
+  return new Promise((resolve) => {
+    if (!els.deleteConfirmModal) {
+      resolve(false);
+      return;
+    }
+    
+    els.deleteConfirmModal.classList.remove("hidden");
+    
+    const handleConfirm = () => {
+      cleanup();
+      resolve(true);
+    };
+    
+    const handleCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+    
+    const handleClickOutside = (e) => {
+      if (e.target === els.deleteConfirmModal) {
+        cleanup();
+        resolve(false);
+      }
+    };
+    
+    const cleanup = () => {
+      els.deleteConfirmModal.classList.add("hidden");
+      els.btnDeleteConfirm.removeEventListener("click", handleConfirm);
+      els.btnDeleteCancel.removeEventListener("click", handleCancel);
+      els.deleteConfirmModal.removeEventListener("click", handleClickOutside);
+    };
+    
+    els.btnDeleteConfirm.addEventListener("click", handleConfirm, { once: true });
+    els.btnDeleteCancel.addEventListener("click", handleCancel, { once: true });
+    els.deleteConfirmModal.addEventListener("click", handleClickOutside, { once: true });
+  });
 }
 
 function applyLang(lang) {
@@ -486,59 +603,564 @@ function appendEventLog(text) {
   els.eventLog.scrollTop = els.eventLog.scrollHeight;
 }
 
+function escapeHtml(raw) {
+  return String(raw || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function markdownToHtml(raw) {
+  const src = String(raw || "").replace(/\r\n/g, "\n");
+  const blocks = [];
+  let html = escapeHtml(src);
+
+  html = html.replace(/```([\s\S]*?)```/g, (_m, code) => {
+    const i = blocks.push(`<pre><code>${code.trim()}</code></pre>`) - 1;
+    return `@@BLOCK_${i}@@`;
+  });
+
+  html = html
+    .replace(/^###\s+(.+)$/gm, "<h3>$1</h3>")
+    .replace(/^##\s+(.+)$/gm, "<h2>$1</h2>")
+    .replace(/^#\s+(.+)$/gm, "<h1>$1</h1>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  html = html.replace(/(?:^|\n)((?:[-*]\s.+(?:\n|$))+)/g, (_m, list) => {
+    const items = list
+      .trim()
+      .split("\n")
+      .map((line) => line.replace(/^[-*]\s+/, "").trim())
+      .map((it) => `<li>${it}</li>`)
+      .join("");
+    return `\n<ul>${items}</ul>`;
+  });
+
+  html = html
+    .split("\n\n")
+    .map((chunk) => {
+      const c = chunk.trim();
+      if (!c) return "";
+      if (c.startsWith("<h") || c.startsWith("<ul>") || c.startsWith("<pre>")) return c;
+      return `<p>${c.replace(/\n/g, "<br>")}</p>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  html = html.replace(/@@BLOCK_(\d+)@@/g, (_m, idx) => blocks[Number(idx)] || "");
+  return html;
+}
+
+function setAssistantRenderedContent(contentEl, rawText) {
+  if (!contentEl) return;
+  contentEl.dataset.rawText = String(rawText || "");
+  contentEl.classList.add("assistant-rich");
+  contentEl.innerHTML = markdownToHtml(contentEl.dataset.rawText);
+}
+
+function clearChatView() {
+  els.chatFeed.innerHTML = "";
+}
+
+function renderTranscript(items = []) {
+  clearChatView();
+  for (const it of items) {
+    const role = it.role === "assistant" ? "assistant" : "user";
+    appendChat(role, it.text || "");
+    const ab = document.getElementById("assistantBubble");
+    if (ab) ab.removeAttribute("id");
+  }
+}
+
+function renderSessionList(items = []) {
+  if (!els.sessionList) return;
+  els.sessionList.innerHTML = "";
+  
+  // Close any open menus when rendering
+  document.querySelectorAll(".session-item-menu").forEach(m => m.remove());
+  
+  for (const s of items) {
+    const row = document.createElement("div");
+    row.dataset.sessionId = s.id;
+    const isActive = state.activeView === "chat" && s.id === state.currentSessionId;
+    row.className = "session-item" + (isActive ? " active" : "");
+
+    const titleBtn = document.createElement("button");
+    titleBtn.className = "session-item-title";
+    titleBtn.textContent = s.title || "新会话";
+    titleBtn.title = "点击切换会话";
+
+    titleBtn.addEventListener("click", async () => {
+      // If it's already current session, still allow entering chat view (fix: single-session can't jump)
+      if (s.id === state.currentSessionId) {
+        switchView("chat");
+        updateSessionActiveStyles();
+        return;
+      }
+      const res = await apiPost("/api/chat/switch", { session_id: s.id });
+      if (!res.ok) {
+        showToast(res.message || "切换会话失败", "error");
+        return;
+      }
+      state.currentSessionId = res.data?.current?.id || s.id;
+      renderTranscript(res.data?.transcript || []);
+      switchView("chat");
+      updateSessionActiveStyles();
+      await loadSessions();
+    });
+
+    const menuBtn = document.createElement("button");
+    menuBtn.className = "session-item-menu-btn";
+    menuBtn.textContent = "⋯";
+    menuBtn.title = "更多选项";
+    menuBtn.style.display = "none"; // Hidden by default, shown on hover
+
+    let menuEl = null;
+    // Delay hiding menu so user has enough time to react
+    let menuHideTimer = null;
+    const cancelHideMenu = () => {
+      if (menuHideTimer) {
+        clearTimeout(menuHideTimer);
+        menuHideTimer = null;
+      }
+    };
+    const scheduleHideMenu = () => {
+      cancelHideMenu();
+      menuHideTimer = setTimeout(() => {
+        // If mouse came back to row/menu/button, keep it
+        try {
+          if (row.matches(":hover") || menuBtn.matches(":hover") || (menuEl && menuEl.matches(":hover"))) {
+            return;
+          }
+        } catch (_e) {}
+        if (menuEl) {
+          menuEl.remove();
+          menuEl = null;
+        }
+        menuBtn.style.display = "none";
+      }, 500);
+    };
+    menuBtn.addEventListener("mouseenter", cancelHideMenu);
+
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cancelHideMenu();
+      // Close other menus
+      document.querySelectorAll(".session-item-menu").forEach(m => {
+        if (m !== menuEl) m.remove();
+      });
+      
+      if (menuEl && menuEl.parentElement) {
+        menuEl.remove();
+        menuEl = null;
+        return;
+      }
+
+      menuEl = document.createElement("div");
+      menuEl.className = "session-item-menu";
+      
+      const renameBtn = document.createElement("button");
+      renameBtn.className = "session-item-menu-item";
+      renameBtn.innerHTML = '<span class="menu-item-icon">✎</span><span>重命名</span>';
+      renameBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        menuEl?.remove();
+        menuEl = null;
+        
+        if (row.classList.contains("editing")) return;
+        row.classList.add("editing");
+
+        const input = document.createElement("input");
+        input.className = "session-item-input";
+        input.value = s.title || "新会话";
+        input.maxLength = 50;
+        input.title = "回车保存，Esc取消";
+
+        const originalTitle = titleBtn.textContent || "新会话";
+        titleBtn.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let done = false;
+        const finish = async (commit) => {
+          if (done) return;
+          done = true;
+          row.classList.remove("editing");
+
+          const nextTitle = String(input.value || "").trim();
+          if (commit && nextTitle && nextTitle !== originalTitle) {
+            const res = await apiPost("/api/chat/rename", { session_id: s.id, title: nextTitle });
+            if (!res.ok) {
+              showToast(res.message || "重命名失败", "error");
+            }
+          }
+          await loadSessions();
+        };
+
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            finish(true);
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            finish(false);
+          }
+        });
+        input.addEventListener("blur", () => finish(true));
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "session-item-menu-item danger";
+      deleteBtn.innerHTML = '<span class="menu-item-icon">🗑</span><span>删除</span>';
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        menuEl?.remove();
+        menuEl = null;
+        
+        // Show custom delete confirm dialog
+        const confirmed = await showDeleteConfirm();
+        if (!confirmed) return;
+        
+        const res = await apiPost("/api/chat/delete", { session_id: s.id });
+        if (!res.ok) {
+          showToast(res.message || "删除失败", "error");
+          return;
+        }
+        state.currentSessionId = res.data?.current?.id || state.currentSessionId;
+        renderTranscript(res.data?.transcript || []);
+        await loadSessions();
+      });
+
+      menuEl.appendChild(renameBtn);
+      menuEl.appendChild(deleteBtn);
+      
+      // Position menu relative to the menu button (on the right side)
+      // Use fixed positioning to avoid being clipped by overflow
+      const rect = menuBtn.getBoundingClientRect();
+      menuEl.style.position = "fixed";
+      menuEl.style.top = `${rect.bottom + 4}px`;
+      menuEl.style.left = `${rect.right + 4}px`;
+      menuEl.style.zIndex = "10000";
+      
+      document.body.appendChild(menuEl);
+      
+      // Keep menu button visible when hovering over menu
+      menuEl.addEventListener("mouseenter", () => {
+        cancelHideMenu();
+        menuBtn.style.display = "flex";
+      });
+      menuEl.addEventListener("mouseleave", () => {
+        scheduleHideMenu();
+      });
+      
+      // Close menu when clicking outside
+      setTimeout(() => {
+        const closeMenu = (ev) => {
+          if (menuEl && !menuEl.contains(ev.target) && !menuBtn.contains(ev.target)) {
+            cancelHideMenu();
+            menuEl.remove();
+            menuEl = null;
+            document.removeEventListener("click", closeMenu);
+          }
+        };
+        document.addEventListener("click", closeMenu);
+      }, 0);
+    });
+
+    // Clicking anywhere on the card enters that conversation (except menu / editing)
+    row.addEventListener("click", (ev) => {
+      if (row.classList.contains("editing")) return;
+      const target = ev.target;
+      if (target && (menuBtn.contains(target) || (menuEl && menuEl.contains(target)))) return;
+      titleBtn.click();
+    });
+
+    row.addEventListener("mouseenter", () => {
+      cancelHideMenu();
+      menuBtn.style.display = "flex";
+    });
+
+    row.addEventListener("mouseleave", (e) => {
+      // Only hide menu button if mouse is not moving to the menu
+      const relatedTarget = e.relatedTarget;
+      if (menuEl && relatedTarget && menuEl.contains(relatedTarget)) {
+        // Mouse is moving to menu, keep button visible
+        return;
+      }
+      // If menu is open, delay-hide it; otherwise hide dots immediately
+      if (menuEl) {
+        scheduleHideMenu();
+      } else {
+        menuBtn.style.display = "none";
+      }
+    });
+
+    row.appendChild(titleBtn);
+    row.appendChild(menuBtn);
+    els.sessionList.appendChild(row);
+  }
+  updateSessionActiveStyles();
+}
+
+function updateSessionActiveStyles() {
+  // Only highlight a session card when in chat view
+  const shouldHighlight = state.activeView === "chat" && !!state.currentSessionId;
+  document.querySelectorAll(".session-item").forEach((el) => {
+    const sid = el.dataset.sessionId || "";
+    el.classList.toggle("active", shouldHighlight && sid === state.currentSessionId);
+  });
+}
+
+async function loadSessions() {
+  const res = await apiGet("/api/chat/sessions");
+  if (!res.ok) return;
+  const current = (res.data || {}).current || {};
+  state.currentSessionId = current.id || "";
+  state.sessionItems = (res.data || {}).items || [];
+  renderSessionList(state.sessionItems);
+}
+
+async function createSession() {
+  const res = await apiPost("/api/chat/new", { title: "新会话" });
+  if (!res.ok) {
+    showToast(res.message || "创建会话失败", "error");
+    return;
+  }
+  state.currentSessionId = res.data?.session_id || "";
+  renderTranscript(res.data?.transcript || []);
+  switchView("chat");
+  await loadSessions();
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderRichText(md) {
+  let html = escapeHtml(md || "");
+  html = html.replace(/```([\s\S]*?)```/g, (_m, code) => `<pre><code>${code.trim()}</code></pre>`);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
+  html = html.replace(/^(?:[-*]|\d+\.)\s+(.+)$/gm, "<li>$1</li>");
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
+  html = html.replace(/<\/ul>\s*<ul>/g, "");
+  html = html.replace(/\n\n+/g, "</p><p>");
+  html = html.replace(/\n/g, "<br>");
+  return `<p>${html}</p>`;
+}
+
 function appendChat(role, text) {
   if (!text) return;
-  // Remove thinking bubble before appending real content
   const tb = document.getElementById("thinkingBubble");
   if (tb) tb.remove();
+
+  if (role === "assistant") {
+    // Append to existing assistant bubble or create one
+    const existing = document.getElementById("assistantBubble");
+    if (existing) {
+      const contentEl = existing.querySelector(".content");
+      if (contentEl) {
+        const prev = contentEl.dataset.raw || "";
+        const next = prev ? `${prev}\n\n${text}` : text;
+        contentEl.dataset.raw = next;
+        contentEl.innerHTML = renderRichText(next);
+      }
+      els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+      return;
+    }
+    const box = document.createElement("div");
+    box.id = "assistantBubble";
+    box.className = "chat-msg assistant";
+    const content = document.createElement("div");
+    content.className = "content";
+    content.dataset.raw = text;
+    content.innerHTML = renderRichText(text);
+    box.appendChild(content);
+    els.chatFeed.appendChild(box);
+    els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+    return;
+  }
+
+  // User or system message — finalize any open assistant bubble
+  if (role === "user") {
+    const ab = document.getElementById("assistantBubble");
+    if (ab) ab.removeAttribute("id");
+  }
+
   const box = document.createElement("div");
   box.className = `chat-msg ${role}`;
-  const roleEl = document.createElement("div");
-  roleEl.className = "role";
-  roleEl.textContent = role === "user" ? t("role.you") : role === "assistant" ? t("role.starbot") : t("role.system");
   const content = document.createElement("div");
   content.className = "content";
   content.textContent = text;
-  box.append(roleEl, content);
+  box.appendChild(content);
+  els.chatFeed.appendChild(box);
+  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+}
+
+function appendProcessStep(text) {
+  if (!text) return;
+  const display = text.length > 120 ? text.slice(0, 120) + "…" : text;
+  const tb = document.getElementById("thinkingBubble");
+  const el = document.createElement("div");
+  el.className = "chat-msg process-step";
+  el.textContent = display;
+  if (tb) {
+    els.chatFeed.insertBefore(el, tb);
+  } else {
+    els.chatFeed.appendChild(el);
+  }
+  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+}
+
+function appendToolCall(toolNames) {
+  if (!toolNames || toolNames.length === 0) return;
+  const tb = document.getElementById("thinkingBubble");
+  const container = document.createElement("div");
+  container.className = "chat-msg tool-call-card";
+  
+  const header = document.createElement("div");
+  header.className = "tool-call-header";
+  
+  const icon = document.createElement("span");
+  icon.className = "tool-call-icon";
+  icon.innerHTML = "🔧";
+  
+  const title = document.createElement("span");
+  title.className = "tool-call-title";
+  title.textContent = "调用工具";
+  
+  header.appendChild(icon);
+  header.appendChild(title);
+  
+  const toolsList = document.createElement("div");
+  toolsList.className = "tool-call-list";
+  toolNames.forEach(name => {
+    const toolItem = document.createElement("div");
+    toolItem.className = "tool-call-item";
+    toolItem.textContent = name;
+    toolsList.appendChild(toolItem);
+  });
+  
+  container.appendChild(header);
+  container.appendChild(toolsList);
+  
+  if (tb) {
+    els.chatFeed.insertBefore(container, tb);
+  } else {
+    els.chatFeed.appendChild(container);
+  }
+  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+}
+
+function appendToolResult(ok, summary, done) {
+  if (!summary) return;
+  const tb = document.getElementById("thinkingBubble");
+  const container = document.createElement("div");
+  container.className = `chat-msg tool-result-card ${ok ? "success" : "error"}`;
+  
+  const icon = document.createElement("span");
+  icon.className = "tool-result-icon";
+  icon.textContent = ok ? "✓" : "✗";
+  
+  const content = document.createElement("div");
+  content.className = "tool-result-content";
+  const display = summary.length > 200 ? summary.slice(0, 200) + "…" : summary;
+  content.textContent = display;
+  
+  container.appendChild(icon);
+  container.appendChild(content);
+  
+  if (tb) {
+    els.chatFeed.insertBefore(container, tb);
+  } else {
+    els.chatFeed.appendChild(container);
+  }
+  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+}
+
+function appendChatImage(image, caption = "") {
+  if (!image || !image.base64) return;
+
+  const streamBubble = document.getElementById("streamBubble");
+  if (streamBubble) streamBubble.id = "assistantBubble";
+
+  const box = document.createElement("div");
+  box.className = "chat-msg assistant image-msg";
+
+  const mediaWrap = document.createElement("div");
+  mediaWrap.className = "chat-image-wrap";
+
+  const img = document.createElement("img");
+  const mime = image.mime || "image/jpeg";
+  img.className = "chat-image";
+  img.src = `data:${mime};base64,${image.base64}`;
+  img.alt = image.name || "generated image";
+  img.loading = "lazy";
+  mediaWrap.appendChild(img);
+
+  box.appendChild(mediaWrap);
+
+  if (caption) {
+    const cap = document.createElement("div");
+    cap.className = "chat-image-caption";
+    cap.textContent = caption;
+    box.appendChild(cap);
+  }
+
+  img.addEventListener("click", () => {
+    els.screenshotImg.src = img.src;
+    els.imageModal.classList.remove("hidden");
+  });
+
   els.chatFeed.appendChild(box);
   els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
 }
 
 function showThinkingBubble(toolNames) {
   let existing = document.getElementById("thinkingBubble");
+  const text = toolNames || "思考中";
+  
   if (existing) {
-    // Update tool label on existing bubble
-    if (toolNames) {
-      const content = existing.querySelector(".thinking-content");
-      let label = existing.querySelector(".thinking-label");
-      if (!label && content) {
-        label = document.createElement("span");
-        label.className = "thinking-label";
-        content.appendChild(label);
-      }
-      if (label) label.textContent = toolNames;
+    const content = existing.querySelector(".thinking-content");
+    let label = existing.querySelector(".thinking-label");
+    if (!label && content) {
+      label = document.createElement("span");
+      label.className = "thinking-label";
+      content.appendChild(label);
     }
+    if (label) label.textContent = text;
     els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
     return;
   }
+  
   const box = document.createElement("div");
   box.id = "thinkingBubble";
   box.className = "chat-msg assistant thinking";
-  const roleEl = document.createElement("div");
-  roleEl.className = "role";
-  roleEl.textContent = t("role.starbot");
   const content = document.createElement("div");
   content.className = "content thinking-content";
   const spinnerEl = document.createElement("span");
   spinnerEl.className = "spinner";
   content.appendChild(spinnerEl);
-  if (toolNames) {
-    const label = document.createElement("span");
-    label.className = "thinking-label";
-    label.textContent = toolNames;
-    content.appendChild(label);
-  }
-  box.append(roleEl, content);
+  const label = document.createElement("span");
+  label.className = "thinking-label";
+  label.textContent = text;
+  content.appendChild(label);
+  box.appendChild(content);
   els.chatFeed.appendChild(box);
   els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
 }
@@ -548,21 +1170,62 @@ function removeThinkingBubble() {
   if (existing) existing.remove();
 }
 
+function showConfirmCard(toolName, toolArgs) {
+  // Remove any existing confirm card
+  const old = document.getElementById("confirmCard");
+  if (old) old.remove();
+
+  const argsText = typeof toolArgs === "object" ? JSON.stringify(toolArgs, null, 2) : String(toolArgs || "");
+  const card = document.createElement("div");
+  card.id = "confirmCard";
+  card.className = "chat-msg confirm-card";
+  card.innerHTML = `
+    <div class="content">
+      <div class="confirm-tool-name">⚠ ${toolName}</div>
+      <pre class="confirm-args">${argsText}</pre>
+      <div class="confirm-actions">
+        <button class="btn primary confirm-btn" data-approve="true">允许执行</button>
+        <button class="btn subtle danger confirm-btn" data-approve="false">拒绝</button>
+      </div>
+    </div>`;
+  els.chatFeed.appendChild(card);
+  els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
+
+  card.querySelectorAll(".confirm-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const approved = btn.dataset.approve === "true";
+      await apiPost("/api/chat/confirm", { approved });
+      card.querySelector(".confirm-actions").innerHTML = `<span class="muted">${approved ? "✓ 已允许" : "✗ 已拒绝"}</span>`;
+      if (approved) showThinkingBubble();
+    });
+  });
+}
+
 function getOrCreateStreamBubble() {
   let el = document.getElementById("streamBubble");
-  if (!el) {
-    removeThinkingBubble();
-    el = document.createElement("div");
-    el.id = "streamBubble";
-    el.className = "chat-msg assistant";
-    const roleEl = document.createElement("div");
-    roleEl.className = "role";
-    roleEl.textContent = t("role.starbot");
-    const content = document.createElement("div");
-    content.className = "content";
-    el.append(roleEl, content);
-    els.chatFeed.appendChild(el);
+  if (el) return el;
+
+  removeThinkingBubble();
+
+  // Reuse existing assistant bubble if present
+  let ab = document.getElementById("assistantBubble");
+  if (ab) {
+    ab.id = "streamBubble";
+    // Add a separator if there's already content
+    const contentEl = ab.querySelector(".content");
+    if (contentEl && contentEl.textContent.trim()) {
+      contentEl.textContent += "\n\n";
+    }
+    return ab;
   }
+
+  el = document.createElement("div");
+  el.id = "streamBubble";
+  el.className = "chat-msg assistant";
+  const content = document.createElement("div");
+  content.className = "content";
+  el.appendChild(content);
+  els.chatFeed.appendChild(el);
   return el;
 }
 
@@ -679,10 +1342,15 @@ function switchView(name) {
       v.style.animation = "none";
       v.offsetHeight; // force reflow
       v.style.animation = "";
+      // Load data when switching to home
+      if (name === "home") {
+        loadHome();
+      }
     } else if (!isTarget) {
       v.classList.remove("active");
     }
   });
+  updateSessionActiveStyles();
 }
 
 async function loadStatus() {
@@ -729,7 +1397,12 @@ async function pollEvents() {
         case "stream_delta": {
           const bubble = getOrCreateStreamBubble();
           const contentEl = bubble.querySelector(".content");
-          if (contentEl) contentEl.textContent += (ev.text || "");
+          if (contentEl) {
+            const prev = contentEl.dataset.raw || "";
+            const next = prev + (ev.text || "");
+            contentEl.dataset.raw = next;
+            contentEl.innerHTML = renderRichText(next);
+          }
           els.chatFeed.scrollTop = els.chatFeed.scrollHeight;
           break;
         }
@@ -737,16 +1410,16 @@ async function pollEvents() {
           const sb = document.getElementById("streamBubble");
           if (sb) {
             const ct = (sb.querySelector(".content")?.textContent || "").trim();
-            if (!ct) { sb.remove(); } else { sb.removeAttribute("id"); }
+            if (!ct) { sb.remove(); } else { sb.id = "assistantBubble"; }
           }
           break;
         }
         case "stream_clear": {
-          // LLM switched from text to tool calls — keep reasoning text if non-empty
+          // LLM switched from text to tool calls — keep text in bubble
           const sc = document.getElementById("streamBubble");
           if (sc) {
             const ct = (sc.querySelector(".content")?.textContent || "").trim();
-            if (!ct) { sc.remove(); } else { sc.removeAttribute("id"); }
+            if (!ct) { sc.remove(); } else { sc.id = "assistantBubble"; }
           }
           showThinkingBubble();
           break;
@@ -755,20 +1428,39 @@ async function pollEvents() {
           appendEventLog(ev.text || "");
           break;
         case "tool_call": {
-          const names = (ev.names || []).join(", ");
-          showThinkingBubble(`${t("log.toolCall")}: ${names}`);
-          appendEventLog(`${t("log.toolCall")}: ${names}`);
+          const names = ev.names || [];
+          const label =
+            names && names.length
+              ? `工具运行中（${names.join("、")}）`
+              : "工具运行中";
+          showThinkingBubble(label);
+          appendEventLog(`${t("log.toolCall")}: ${names.join(", ")}`);
           break;
         }
         case "tool_result":
           appendEventLog(`${ev.done ? t("log.done") : t("log.step")}: ${ev.summary || ""}`);
+          if (ev.image && ev.image.base64) {
+            appendChatImage(ev.image, ev.summary || "");
+          }
           if (!ev.done) {
-            showThinkingBubble();
+            showThinkingBubble("思考中");
+          } else {
+            // 工具已结束，移除“工具运行中/思考中”提示
+            removeThinkingBubble();
           }
           break;
+        case "confirm_request": {
+          removeThinkingBubble();
+          showConfirmCard(ev.tool, ev.args);
+          break;
+        }
         case "done":
           removeThinkingBubble();
+          // Finalize assistant bubble
+          const ab = document.getElementById("assistantBubble");
+          if (ab) ab.removeAttribute("id");
           setBusy(false);
+          await loadSessions();
           break;
         case "error":
           appendEventLog(`${t("toast.error")}: ${ev.message || ""}`);
@@ -967,12 +1659,35 @@ async function loadSkills() {
   }
   const items = (res.data || {}).items || [];
   state.skillItems = items;
-  renderTable(els.skillsTable, [
+  state.skillsPage = 1;
+  renderSkills();
+}
+
+function getSkillColumns() {
+  return [
     { key: "name", label: t("table.colName") },
     { key: "version", label: t("table.colVersion") },
     { key: "kind", label: t("table.colKind") },
     { key: "managed", label: t("table.colManaged"), render: (r) => (r.managed ? t("misc.yes") : t("misc.no")) },
-    { key: "tools", label: t("table.colTools"), render: (r) => (r.tools || []).join(", ") },
+    {
+      key: "tools",
+      label: t("table.colTools"),
+      render: (r) => {
+        const tools = Array.isArray(r.tools) ? r.tools : [];
+        if (!tools.length) return "";
+        const full = tools.join(", ");
+        const maxVisible = 3;
+        const short =
+          tools.length > maxVisible
+            ? `${tools.slice(0, maxVisible).join(", ")} … (+${tools.length - maxVisible})`
+            : full;
+        const span = document.createElement("span");
+        span.className = "skills-tools-cell";
+        span.textContent = short;
+        span.title = full;
+        return span;
+      },
+    },
     {
       key: "actions",
       label: t("table.colActions"),
@@ -982,7 +1697,135 @@ async function loadSkills() {
         { label: t("table.actionRemove"), onClick: () => skillRemoveByName(r.name) },
       ]),
     },
-  ], items);
+  ];
+}
+
+function renderSkills() {
+  if (!els.skillsTable) return;
+  const items = state.skillItems || [];
+  const pageSize = state.skillsPageSize || 15;
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  if (state.skillsPage < 1) state.skillsPage = 1;
+  if (state.skillsPage > totalPages) state.skillsPage = totalPages;
+
+  const start = (state.skillsPage - 1) * pageSize;
+  const pageItems = items.slice(start, start + pageSize);
+
+  renderTable(els.skillsTable, getSkillColumns(), pageItems);
+  renderSkillsPager(totalPages);
+}
+
+function renderSkillsPager(totalPages) {
+  if (!els.skillsPager) return;
+  const container = els.skillsPager;
+  container.innerHTML = "";
+  const items = state.skillItems || [];
+  if (!items.length || totalPages <= 1) {
+    container.style.display = items.length ? "flex" : "none";
+    if (!items.length) return;
+  }
+  container.style.display = "flex";
+
+  const page = state.skillsPage;
+
+  const makeBtn = (label, disabled, onClick, extraClass = "") => {
+    const btn = document.createElement("button");
+    btn.className = `pager-btn ${extraClass}`.trim();
+    btn.textContent = label;
+    btn.disabled = !!disabled;
+    if (!disabled && onClick) btn.addEventListener("click", onClick);
+    return btn;
+  };
+
+  // Prev
+  container.appendChild(
+    makeBtn("«", page <= 1, () => {
+      state.skillsPage -= 1;
+      renderSkills();
+    }, "pager-prev"),
+  );
+
+  // Page numbers (window around current)
+  const windowSize = 5;
+  const half = Math.floor(windowSize / 2);
+  let start = Math.max(1, page - half);
+  let end = Math.min(totalPages, start + windowSize - 1);
+  if (end - start + 1 < windowSize) {
+    start = Math.max(1, end - windowSize + 1);
+  }
+
+  if (start > 1) {
+    container.appendChild(
+      makeBtn("1", false, () => {
+        state.skillsPage = 1;
+        renderSkills();
+      }),
+    );
+    if (start > 2) {
+      const dots = document.createElement("span");
+      dots.className = "pager-dots";
+      dots.textContent = "…";
+      container.appendChild(dots);
+    }
+  }
+
+  for (let p = start; p <= end; p++) {
+    const btn = makeBtn(String(p), false, () => {
+      state.skillsPage = p;
+      renderSkills();
+    }, p === page ? "active" : "");
+    container.appendChild(btn);
+  }
+
+  if (end < totalPages) {
+    if (end < totalPages - 1) {
+      const dots = document.createElement("span");
+      dots.className = "pager-dots";
+      dots.textContent = "…";
+      container.appendChild(dots);
+    }
+    container.appendChild(
+      makeBtn(String(totalPages), false, () => {
+        state.skillsPage = totalPages;
+        renderSkills();
+      }),
+    );
+  }
+
+  // Next
+  container.appendChild(
+    makeBtn("»", page >= totalPages, () => {
+      state.skillsPage += 1;
+      renderSkills();
+    }, "pager-next"),
+  );
+
+  // Page jumper
+  const jumper = document.createElement("div");
+  jumper.className = "pager-jumper";
+  const label = document.createElement("span");
+  label.textContent = `第 ${page}/${totalPages} 页`;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.max = String(totalPages);
+  input.value = String(page);
+  input.className = "pager-input";
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const val = Number(input.value || "1");
+      if (!Number.isFinite(val)) return;
+      const next = Math.min(Math.max(1, val), totalPages);
+      if (next !== state.skillsPage) {
+        state.skillsPage = next;
+        renderSkills();
+      }
+    }
+  });
+  jumper.appendChild(label);
+  jumper.appendChild(input);
+  container.appendChild(jumper);
 }
 
 async function skillInfoByName(name) {
@@ -1066,6 +1909,171 @@ async function loadTasks() {
   setTaskActionResult(res);
 }
 
+async function loadHome() {
+  // Load stats
+  const [statusRes, sessionsRes, memoryRes, tasksRes] = await Promise.allSettled([
+    apiGet("/api/status"),
+    apiGet("/api/chat/sessions"),
+    apiGet("/api/memory/stats"),
+    apiGet("/api/tasks"),
+  ]);
+
+  // Update stat cards
+  if (statusRes.status === "fulfilled" && statusRes.value.ok) {
+    const statusData = statusRes.value.data || {};
+    const tasks = statusData.tasks || [];
+    const runningTasks = tasks.filter(t => t.status === "running").length;
+    if (els.homeStatTasks) {
+      els.homeStatTasks.textContent = runningTasks > 0 ? `${runningTasks}` : "0";
+    }
+  }
+
+  if (sessionsRes.status === "fulfilled" && sessionsRes.value.ok) {
+    const sessions = (sessionsRes.value.data || {}).items || [];
+    if (els.homeStatSessions) {
+      els.homeStatSessions.textContent = sessions.length.toString();
+    }
+    renderRecentSessions(sessions.slice(0, 5));
+  }
+
+  if (memoryRes.status === "fulfilled" && memoryRes.value.ok) {
+    const stats = (memoryRes.value.data || {}).stats || {};
+    const total = Object.values(stats).reduce((sum, count) => sum + (count || 0), 0);
+    if (els.homeStatMemories) {
+      els.homeStatMemories.textContent = total.toString();
+    }
+  }
+
+  if (tasksRes.status === "fulfilled" && tasksRes.value.ok) {
+    const tasks = (tasksRes.value.data || {}).items || [];
+    const runningTasks = tasks.filter(t => t.status === "running").length;
+    if (els.homeStatTasks && !els.homeStatTasks.textContent) {
+      els.homeStatTasks.textContent = runningTasks > 0 ? `${runningTasks}` : "0";
+    }
+  }
+
+  // Update system status
+  if (statusRes.status === "fulfilled" && statusRes.value.ok) {
+    const statusData = statusRes.value.data || {};
+    renderHomeSystemStatus(statusData);
+  }
+}
+
+function renderHomeSystemStatus(data) {
+  if (!els.homeSystemStatus) return;
+  els.homeSystemStatus.innerHTML = "";
+
+  const items = [
+    {
+      label: t("home.statusModel"),
+      value: data.model || "-",
+      status: data.model ? "ok" : "warn",
+    },
+    {
+      label: t("home.statusSession"),
+      value: data.session_active ? t("home.statusActive") : t("home.statusInactive"),
+      status: data.session_active ? "ok" : "warn",
+    },
+    {
+      label: t("home.statusProcessing"),
+      value: data.session_busy ? t("status.busy") : t("status.idle"),
+      status: data.session_busy ? "warn" : "ok",
+    },
+  ];
+
+  if (data.cpu !== null && data.cpu !== undefined) {
+    items.push({
+      label: t("home.statusCPU"),
+      value: `${data.cpu.toFixed(1)}%`,
+      status: data.cpu > 80 ? "error" : data.cpu > 60 ? "warn" : "ok",
+    });
+  }
+
+  if (data.memory) {
+    const memPercent = data.memory.percent || 0;
+    const memGB = (data.memory.used / 1024 / 1024 / 1024).toFixed(1);
+    const memTotalGB = (data.memory.total / 1024 / 1024 / 1024).toFixed(1);
+    items.push({
+      label: t("home.statusMemory"),
+      value: `${memGB}GB / ${memTotalGB}GB (${memPercent.toFixed(1)}%)`,
+      status: memPercent > 80 ? "error" : memPercent > 60 ? "warn" : "ok",
+    });
+  }
+
+  items.forEach(item => {
+    const el = document.createElement("div");
+    el.className = "home-status-item";
+    const label = document.createElement("div");
+    label.className = "home-status-label";
+    label.textContent = item.label;
+    const value = document.createElement("div");
+    value.className = `home-status-value ${item.status || ""}`;
+    value.textContent = item.value;
+    el.appendChild(label);
+    el.appendChild(value);
+    els.homeSystemStatus.appendChild(el);
+  });
+}
+
+function renderRecentSessions(sessions) {
+  if (!els.homeRecentSessions) return;
+  els.homeRecentSessions.innerHTML = "";
+
+  if (!sessions || sessions.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.style.cssText = "padding: 24px; text-align: center;";
+    empty.textContent = t("home.noSessions");
+    els.homeRecentSessions.appendChild(empty);
+    return;
+  }
+
+  sessions.forEach(session => {
+    const el = document.createElement("div");
+    el.className = "home-recent-item";
+    el.addEventListener("click", async () => {
+      const res = await apiPost("/api/chat/switch", { session_id: session.id });
+      if (res.ok) {
+        state.currentSessionId = session.id;
+        switchView("chat");
+        await loadSessions();
+      }
+    });
+
+    const title = document.createElement("div");
+    title.className = "home-recent-title";
+    title.textContent = session.title || t("chat.newSession");
+    el.appendChild(title);
+
+    if (session.updated_at) {
+      const time = document.createElement("div");
+      time.className = "home-recent-time";
+      const date = new Date(session.updated_at * 1000);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+      
+      if (diffMins < 1) {
+        time.textContent = t("home.timeJustNow");
+      } else if (diffMins < 60) {
+        time.textContent = t("home.timeMinutesAgo").replace("{0}", diffMins);
+      } else if (diffHours < 24) {
+        time.textContent = t("home.timeHoursAgo").replace("{0}", diffHours);
+      } else if (diffDays < 7) {
+        time.textContent = t("home.timeDaysAgo").replace("{0}", diffDays);
+      } else {
+        const locale = state.currentLang === "zh" ? "zh-CN" : "en-US";
+        time.textContent = date.toLocaleDateString(locale, { month: "short", day: "numeric" });
+      }
+      el.appendChild(time);
+    }
+
+    els.homeRecentSessions.appendChild(el);
+  });
+}
+
 async function doRollback() {
   const count = Number(els.rollbackCount.value || 1);
   const res = await apiPost("/api/rollback", { count });
@@ -1103,15 +2111,20 @@ function wireNav() {
 
 function wireActions() {
   els.btnChatSend.addEventListener("click", sendChat);
-  els.btnChatStop.addEventListener("click", async () => {
+  els.btnChatStop?.addEventListener("click", async () => {
     const res = await apiPost("/api/chat/stop", {});
     showToast(res.message || t("toast.stopRequested"), res.ok ? "warn" : "error");
   });
-  els.btnChatReset.addEventListener("click", async () => {
+  els.btnChatReset?.addEventListener("click", async () => {
     const res = await apiPost("/api/chat/reset", {});
     showToast(res.message || t("session.reset"), res.ok ? "ok" : "error");
-    if (res.ok) appendChat("system", t("session.reset"));
+    if (res.ok) {
+      clearChatView();
+      appendChat("system", t("session.reset"));
+      await loadSessions();
+    }
   });
+  els.btnSessionNew?.addEventListener("click", createSession);
   els.btnClearEventLog.addEventListener("click", () => {
     els.eventLog.textContent = "";
   });
@@ -1157,9 +2170,9 @@ function wireActions() {
     }
   });
 
-  els.btnQuickStatus.addEventListener("click", loadStatus);
-  els.btnQuickDoctor.addEventListener("click", loadDoctor);
-  els.btnOpenScreenshot.addEventListener("click", openScreenshotModal);
+  els.btnQuickStatus?.addEventListener("click", loadStatus);
+  els.btnQuickDoctor?.addEventListener("click", loadDoctor);
+  els.btnOpenScreenshot?.addEventListener("click", openScreenshotModal);
   els.btnCloseImageModal.addEventListener("click", closeScreenshotModal);
   els.imageModal.addEventListener("click", (e) => {
     if (e.target === els.imageModal) closeScreenshotModal();
@@ -1195,6 +2208,24 @@ function wireActions() {
 
   els.btnRefreshTasks.addEventListener("click", loadTasks);
   els.btnRollback.addEventListener("click", doRollback);
+
+  // Home page actions
+  els.btnRefreshHome?.addEventListener("click", loadHome);
+  els.homeActionNewChat?.addEventListener("click", async () => {
+    await createSession();
+  });
+  els.homeActionDoctor?.addEventListener("click", () => {
+    switchView("doctor");
+  });
+  els.homeActionSkills?.addEventListener("click", () => {
+    switchView("skills");
+  });
+  els.homeActionTasks?.addEventListener("click", () => {
+    switchView("tasks");
+  });
+  els.homeActionConfig?.addEventListener("click", () => {
+    switchView("config");
+  });
 
   document.querySelectorAll("#langPicker .seg-btn").forEach(b =>
     b.addEventListener("click", () => applyLang(b.dataset.lang)));
@@ -1250,7 +2281,6 @@ function closeModelDropdown() {
 }
 
 async function bootstrapPanels() {
-  appendChat("system", t("log.connected"));
   await Promise.allSettled([
     loadStatus(),
     loadDoctor(),
@@ -1258,7 +2288,18 @@ async function bootstrapPanels() {
     loadSkills(),
     loadMemoryList(),
     loadTasks(),
+    loadSessions(),
   ]);
+  const ss = await apiGet("/api/chat/sessions");
+  if (ss.ok) {
+    renderTranscript((ss.data || {}).transcript || []);
+    state.sessionItems = (ss.data || {}).items || [];
+    renderSessionList(state.sessionItems);
+    state.currentSessionId = (ss.data || {}).current?.id || state.currentSessionId;
+    updateSessionActiveStyles();
+  } else {
+    appendChat("system", t("log.connected"));
+  }
 }
 
 function startPolling() {
@@ -1273,7 +2314,7 @@ function init() {
   wireNav();
   wireActions();
   wireTitlebar();
-  switchView("chat");
+  switchView("home");
   bootstrapPanels();
   startPolling();
 }

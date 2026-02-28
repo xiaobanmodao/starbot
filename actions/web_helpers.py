@@ -68,7 +68,7 @@ def search_bing(query: str) -> list[dict]:
     try:
         resp = requests.get(
             "https://www.bing.com/search",
-            params={"q": query},
+            params={"q": query, "cc": "cn", "setLang": "zh-cn"},
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -94,12 +94,46 @@ def search_bing(query: str) -> list[dict]:
     return items[:8]
 
 
+def _is_cjk(s: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" for ch in s)
+
+
 def do_web_search(query: str) -> list[dict]:
-    """Search with DDG, fall back to Bing if empty."""
-    results = search_ddg(query)
-    if not results:
-        results = search_bing(query)
-    return results
+    """Search helper with better handling for中文/二次元查询.
+
+    - 中文/日文优先用 Bing（更懂本地语境），DDG 作为兜底
+    - 对包含“头像/二次元/动漫”等关键词的查询，自动补充一点语境
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    has_cjk = _is_cjk(q)
+    anime_keywords = ("头像", "二次元", "动漫", "立绘", "PFP", "pfp")
+    is_anime = any(k.lower() in q.lower() for k in anime_keywords)
+
+    search_query = q
+    if has_cjk and is_anime:
+        # 为头像/角色类搜索增加一点二次元语境提示
+        if "头像" in q:
+            search_query = f"{q} 二次元 头像"
+        else:
+            search_query = f"{q} 二次元 动漫"
+
+    if has_cjk:
+        # 中文 / 日文 → 直接用 Bing，DDG 兜底
+        results = search_bing(search_query)
+        if not results and search_query != q:
+            results = search_bing(q)
+        if not results:
+            results = search_ddg(search_query)
+    else:
+        # 英文等其他语言：先 DDG，再 Bing
+        results = search_ddg(q)
+        if not results:
+            results = search_bing(q)
+
+    return results or []
 
 
 def extract_html_text(html: str) -> str:

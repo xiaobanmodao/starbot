@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
+import io
 import subprocess
 import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
+
+from PIL import Image, ImageTk
 
 from core.session_controller import SessionController
 
@@ -17,6 +21,7 @@ class StarbotGuiClient(tk.Tk):
         self.controller = controller or SessionController()
         self._busy = False
         self._closed = False
+        self._chat_images: list[ImageTk.PhotoImage] = []
         self._build_window()
         self._build_style()
         self._build_layout()
@@ -323,6 +328,9 @@ class StarbotGuiClient(tk.Tk):
             prefix = "done" if done else "step"
             tag = "ok" if ok else "error"
             self._append_event(f"{prefix}: {summary}", level=tag)
+            image = event.get("image") or {}
+            if isinstance(image, dict) and image.get("base64"):
+                self._append_chat_image(image, caption=summary)
             return
         if et == "cancelled":
             self._append_event("Task cancelled.", level="warn")
@@ -362,6 +370,36 @@ class StarbotGuiClient(tk.Tk):
         w.insert("end", f"{text}\n\n", (body_tag,))
         w.configure(state="disabled")
         w.see("end")
+
+    def _append_chat_image(self, image_payload: dict, caption: str = ""):
+        """Append image message into chat pane from base64 payload."""
+        b64 = str(image_payload.get("base64", "") or "").strip()
+        if not b64:
+            return
+        try:
+            raw = base64.b64decode(b64)
+            pil = Image.open(io.BytesIO(raw)).convert("RGB")
+            max_w = 560
+            max_h = 340
+            w, h = pil.size
+            scale = min(max_w / max(1, w), max_h / max(1, h), 1.0)
+            if scale < 1.0:
+                pil = pil.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(pil)
+            self._chat_images.append(photo)
+
+            wdg = self.chat_text
+            wdg.configure(state="normal")
+            wdg.insert("end", "Starbot\n", ("assistant_hdr",))
+            wdg.image_create("end", image=photo)
+            if caption:
+                wdg.insert("end", f"\n{caption}\n\n", ("assistant_body",))
+            else:
+                wdg.insert("end", "\n\n", ("assistant_body",))
+            wdg.configure(state="disabled")
+            wdg.see("end")
+        except Exception as e:
+            self._append_event(f"Image render failed: {e}", level="warn")
 
     def _append_event(self, text: str, *, level: str = "info"):
         t = self.event_text

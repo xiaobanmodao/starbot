@@ -7,9 +7,13 @@ import logging
 import shutil
 import importlib.util
 import threading
+import socket
+import base64
+import io
 import psutil
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
@@ -1228,6 +1232,13 @@ class StarBotClient(discord.Client):
                         last_image = img
                     elif img:
                         last_image = img
+                        step_text = str(result.get("result", "") or "")
+                        await self._send_image_reply(
+                            reply_target,
+                            step_text[:500] if step_text else f"工具 {a.get('name', 'unknown')} 返回了图片结果",
+                            image_path=img,
+                            t0=t0,
+                        )
 
                 # ── 工具执行完毕 → 删除工具状态消息 ─────────────────────────
                 await safe_delete(tool_msg)
@@ -1274,6 +1285,39 @@ class StarBotClient(discord.Client):
         # Channel 和 Thread 都有 .send()，统一使用
         return target.send
 
+    async def _send_image_reply(self, target, text: str, image_path: str | None = None, image_b64: str | None = None,
+                                image_name: str = "result.jpg", t0: float | None = None):
+        """Send an image embed from local path or base64 payload."""
+        if t0 is None:
+            t0 = time.time()
+
+        data = None
+        fname = image_name or "result.jpg"
+
+        if image_path:
+            try:
+                with open(image_path, "rb") as f:
+                    data = f.read()
+                fname = os.path.basename(image_path) or fname
+            except Exception:
+                data = None
+
+        if data is None and image_b64:
+            try:
+                data = base64.b64decode(image_b64)
+            except Exception:
+                data = None
+
+        if not data:
+            await self._send_fn(target)(text[:4000] if text else "图片发送失败")
+            return
+
+        embed = discord.Embed(color=0x9b59b6, timestamp=datetime.now())
+        embed.set_footer(text=self._footer(t0))
+        embed.description = text[:4000] if text else "图片结果"
+        embed.set_image(url=f"attachment://{fname}")
+        await self._send_fn(target)(embed=embed, file=discord.File(io.BytesIO(data), filename=fname))
+
     async def _edit_or_reply(self, target, target_msg, text: str, image_path: str = None, t0: float = None):
         if t0 is None:
             t0 = time.time()
@@ -1281,9 +1325,7 @@ class StarBotClient(discord.Client):
         embed = discord.Embed(color=0x9b59b6, timestamp=datetime.now())
         embed.set_footer(text=self._footer(t0))
         if image_path:
-            embed.description = text[:4000] if len(text) <= 4000 else text[:4000] + "…"
-            embed.set_image(url=f"attachment://{fname}")
-            await self._send_fn(target)(embed=embed, file=discord.File(image_path, filename=fname))
+            await self._send_image_reply(target, text, image_path=image_path, image_name=fname, t0=t0)
             return
         if target_msg:
             try:
@@ -1600,7 +1642,7 @@ class StarBotClient(discord.Client):
 
 
 def start_discord():
-    proxy = config.DISCORD_PROXY or None
+    proxy = _select_discord_proxy()
     client = StarBotClient(intents=intents, proxy=proxy)
     client.run(config.DISCORD_BOT_TOKEN)
 
@@ -1613,7 +1655,7 @@ def start_discord_background() -> threading.Thread | None:
 
     def _run():
         try:
-            proxy = config.DISCORD_PROXY or None
+            proxy = _select_discord_proxy()
             client = StarBotClient(intents=intents, proxy=proxy)
             client.run(token)
         except Exception as e:
@@ -1622,6 +1664,46 @@ def start_discord_background() -> threading.Thread | None:
     t = threading.Thread(target=_run, daemon=True, name="starbot-discord")
     t.start()
     return t
+
+
+def _normalize_proxy_url(raw: str) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if "://" not in value:
+        value = f"http://{value}"
+    parsed = urlparse(value)
+    if not parsed.hostname or not parsed.port:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    return value
+
+
+def _is_proxy_reachable(proxy_url: str, timeout: float = 2.0) -> bool:
+    parsed = urlparse(proxy_url)
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _select_discord_proxy() -> str | None:
+    raw = config.DISCORD_PROXY or ""
+    proxy = _normalize_proxy_url(raw)
+    if not proxy:
+        if raw.strip():
+            log.warning("Invalid DISCORD_PROXY value, fallback to direct connection: %r", raw)
+        return None
+    if not _is_proxy_reachable(proxy):
+        log.warning("DISCORD_PROXY is not reachable, fallback to direct connection: %s", proxy)
+        return None
+    return proxy
 
 
 if __name__ == "__main__":

@@ -42,12 +42,23 @@
         </div>
       </div>
       <nav class="nav-tabs" id="navTabs">
-        <button class="nav-tab active" data-view="chat" data-i18n="nav.chat">Home</button>
+        <button class="nav-tab active" data-view="home" data-i18n="nav.chat">Home</button>
         <button class="nav-tab" data-view="doctor" data-i18n="nav.doctor">Doctor</button>
         <button class="nav-tab" data-view="config" data-i18n="nav.config">Config</button>
         <button class="nav-tab" data-view="skills" data-i18n="nav.skills">Skills</button>
         <button class="nav-tab" data-view="tasks" data-i18n="nav.tasks">Tasks</button>
       </nav>
+
+      <div class="session-pane">
+        <div class="session-pane-head">
+          <span data-i18n="sessions.title">会话列表</span>
+          <button class="btn subtle session-new-btn" id="btnSessionNew" title="新建会话" aria-label="新建会话">
+            <span class="session-new-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="session-list" id="sessionList"></div>
+      </div>
+
       <div class="side-footer">
         <p data-i18n="footer.discord">Discord mode remains available.</p>
         <p class="muted" data-i18n="footer.hint">This UI is an additional local client.</p>
@@ -71,16 +82,94 @@
             </div>
           </div>
         </div>
-        <div class="top-actions">
-          <button class="btn subtle" id="btnChatReset" data-i18n="chat.newSession">New Session</button>
-          <button class="btn subtle danger" id="btnChatStop" data-i18n="chat.stop">Stop</button>
-          <button class="btn subtle" id="btnQuickStatus" data-i18n="top.refreshStatus">Refresh Status</button>
-          <button class="btn subtle" id="btnQuickDoctor" data-i18n="top.doctor">Doctor</button>
-          <button class="btn primary" id="btnOpenScreenshot" data-i18n="top.screenshot">Screenshot</button>
-        </div>
       </header>
 
-      <section class="view active" id="view-chat">
+      <section class="view active" id="view-home">
+        <div class="home-scroll">
+          <!-- Welcome Section -->
+          <section class="card home-welcome">
+            <div class="home-welcome-content">
+              <h1 data-i18n="home.welcome">欢迎使用 Starbot</h1>
+              <p class="muted" data-i18n="home.welcomeDesc">你的 AI 自动化助手已就绪。开始对话、管理任务，或查看系统状态。</p>
+            </div>
+          </section>
+
+          <!-- Quick Stats -->
+          <div class="grid three-col">
+            <section class="card home-stat-card">
+              <div class="home-stat-icon">💬</div>
+              <div class="home-stat-content">
+                <div class="home-stat-value" id="homeStatSessions">-</div>
+                <div class="home-stat-label" data-i18n="home.statSessions">对话会话</div>
+              </div>
+            </section>
+            <section class="card home-stat-card">
+              <div class="home-stat-icon">🧠</div>
+              <div class="home-stat-content">
+                <div class="home-stat-value" id="homeStatMemories">-</div>
+                <div class="home-stat-label" data-i18n="home.statMemories">记忆条目</div>
+              </div>
+            </section>
+            <section class="card home-stat-card">
+              <div class="home-stat-icon">⚡</div>
+              <div class="home-stat-content">
+                <div class="home-stat-value" id="homeStatTasks">-</div>
+                <div class="home-stat-label" data-i18n="home.statTasks">后台任务</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- System Status & Quick Actions -->
+          <div class="grid two-col">
+            <section class="card">
+              <div class="card-head">
+                <h2 data-i18n="home.systemStatus">系统状态</h2>
+                <button class="btn subtle" id="btnRefreshHome" data-i18n="doctor.refresh">刷新</button>
+              </div>
+              <div id="homeSystemStatus" class="home-status-list"></div>
+            </section>
+            <section class="card">
+              <div class="card-head">
+                <h2 data-i18n="home.quickActions">快速入口</h2>
+              </div>
+              <div class="home-quick-actions">
+                <button class="home-action-btn" id="homeActionNewChat">
+                  <span class="home-action-icon">💬</span>
+                  <span class="home-action-text" data-i18n="home.actionNewChat">新建对话</span>
+                </button>
+                <button class="home-action-btn" id="homeActionDoctor">
+                  <span class="home-action-icon">🔍</span>
+                  <span class="home-action-text" data-i18n="home.actionDoctor">系统诊断</span>
+                </button>
+                <button class="home-action-btn" id="homeActionSkills">
+                  <span class="home-action-icon">🧩</span>
+                  <span class="home-action-text" data-i18n="home.actionSkills">技能管理</span>
+                </button>
+                <button class="home-action-btn" id="homeActionTasks">
+                  <span class="home-action-icon">⚙️</span>
+                  <span class="home-action-text" data-i18n="home.actionTasks">后台任务</span>
+                </button>
+                <button class="home-action-btn" id="homeActionConfig">
+                  <span class="home-action-icon">⚙️</span>
+                  <span class="home-action-text" data-i18n="home.actionConfig">配置设置</span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- Recent Activity -->
+          <section class="card">
+            <div class="card-head">
+              <h2 data-i18n="home.recentSessions">最近对话</h2>
+            </div>
+            <div id="homeRecentSessions" class="home-recent-list">
+              <p class="muted" style="padding: 24px; text-align: center;" data-i18n="home.noSessions">暂无对话记录</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-chat">
         <div class="chat-feed" id="chatFeed"></div>
         <div class="composer-float">
           <div class="composer-attachments" id="composerAttachments"></div>
@@ -189,8 +278,9 @@
       </section>
 
       <section class="view" id="view-skills">
-        <div class="grid two-col">
-          <section class="card">
+        <div class="config-scroll">
+          <div class="grid skills-grid">
+            <section class="card skills-list-card">
             <div class="card-head">
               <h2 data-i18n="skills.title">Skills</h2>
               <div class="inline-actions">
@@ -199,6 +289,7 @@
               </div>
             </div>
             <div id="skillsTable" class="table-wrap"></div>
+            <div id="skillsPager" class="skills-pager"></div>
           </section>
           <section class="card">
             <div class="card-head"><h2 data-i18n="skills.actions">Skill Actions</h2></div>
@@ -216,11 +307,13 @@
             </div>
             <pre class="json-box mt12" id="skillActionResult"></pre>
           </section>
+          </div>
         </div>
       </section>
 
       <section class="view" id="view-tasks">
-        <div class="card">
+        <div class="config-scroll">
+          <div class="card">
           <div class="card-head">
             <h2 data-i18n="tasks.title">Background Tasks</h2>
             <button class="btn subtle" id="btnRefreshTasks" data-i18n="tasks.refresh">Refresh</button>
@@ -233,6 +326,7 @@
             <button class="btn subtle" id="btnRollback" data-i18n="tasks.rollbackBtn">Rollback</button>
           </div>
           <pre class="json-box mt12" id="taskActionResult"></pre>
+          </div>
         </div>
       </section>
     </main>
@@ -247,6 +341,20 @@
         <button class="btn subtle" id="btnCloseImageModal" data-i18n="screenshot.close">Close</button>
       </div>
       <img id="screenshotImg" alt="screenshot preview" />
+    </div>
+  </div>
+  <div id="deleteConfirmModal" class="delete-confirm-modal hidden">
+    <div class="delete-confirm-card">
+      <div class="delete-confirm-header">
+        <h3>删除会话</h3>
+      </div>
+      <div class="delete-confirm-body">
+        <p>确定要删除这个会话吗？此操作无法撤销。</p>
+      </div>
+      <div class="delete-confirm-actions">
+        <button class="btn subtle" id="btnDeleteCancel">取消</button>
+        <button class="btn danger" id="btnDeleteConfirm">删除</button>
+      </div>
     </div>
   </div>
 

@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import time
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,59 @@ class LocalClientService:
         self.skill_manager = skill_manager
         self.task_mgr = task_mgr
         self._screenshot_provider = screenshot_provider
+
+        # 将后台任务完成回调接到本地 Memory：任何 bg_task 完成后，自动保存一条知识记忆
+        try:
+            from actions import executor as _executor
+
+            def _on_bg_task_done(info):
+                try:
+                    name = getattr(info, "name", "") or "后台任务"
+                    status = getattr(info, "status", "")
+                    result = getattr(info, "result", "") or ""
+                    if not result:
+                        return
+                    created_at = getattr(info, "created_at", 0.0)
+                    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created_at)) if created_at else ""
+                    header = f"[后台任务完成] {name}"
+                    if ts:
+                        header += f" @ {ts}"
+                    if status:
+                        header += f"（状态：{status}）"
+                    content = f"{header}\n\n{result}"
+                    # 作为知识类记忆保存，importance 稍微高一点，方便早上总结
+                    self.memory.save("knowledge", content, importance=7)
+                except Exception:
+                    # 记忆保存失败不影响主流程
+                    pass
+
+            _executor._on_bg_task_done = _on_bg_task_done
+        except Exception:
+            # 如果 actions.executor 尚未加载或结构不同，静默忽略，不影响主流程
+            pass
+
+        # 周期性清理低重要度旧记忆，防止长期堆积“无关小事”
+        def _memory_housekeeping_loop():
+            while True:
+                try:
+                    # 清理 importance <= 3 且 30 天前的记忆
+                    deleted = getattr(self.memory, "cleanup_low_importance", lambda **_: 0)(
+                        max_age_days=30, importance_threshold=3
+                    )
+                    if deleted:
+                        log = getattr(__import__("logging"), "getLogger")(__name__)
+                        log.info("Memory housekeeping removed %d low-importance rows", deleted)
+                except Exception:
+                    # 清理失败不影响主程序
+                    pass
+                # 每 6 小时运行一次
+                time.sleep(6 * 60 * 60)
+
+        try:
+            t = threading.Thread(target=_memory_housekeeping_loop, daemon=True)
+            t.start()
+        except Exception:
+            pass
 
         if config_obj is None or config_module is None:
             import config as _config_module
@@ -173,7 +227,12 @@ class LocalClientService:
     def send_chat(self, text: str, *, attachments: list[dict] | None = None) -> dict:
         if self.controller.is_busy:
             return self._result(False, message="Session is busy. Stop current task first.", code="busy")
-        if not self.controller.send_message(text, attachments=attachments):
+        try:
+            queued = self.controller.send_message(text, attachments=attachments)
+        except TypeError:
+            # Backward compatibility for tests/fakes exposing send_message(text)
+            queued = self.controller.send_message(text)
+        if not queued:
             return self._result(False, message="Empty message or failed to queue.", code="send_failed")
         return self._result(True, message="Queued", data={"queued": True})
 
@@ -193,11 +252,66 @@ class LocalClientService:
         self.controller.cancel()
         return self._result(True, message="Cancellation requested")
 
+    def confirm_chat(self, approved: bool) -> dict:
+        self.controller.confirm_response(approved)
+        return self._result(True, message="approved" if approved else "denied")
+
     def reset_chat(self) -> dict:
         ok = self.controller.reset_session()
         if not ok:
             return self._result(False, message="Cannot reset while session is busy", code="busy")
         return self._result(True, message="Session reset")
+
+    def chat_sessions(self) -> dict:
+        items = self.controller.list_sessions() if hasattr(self.controller, "list_sessions") else []
+        current = self.controller.get_current_session() if hasattr(self.controller, "get_current_session") else {}
+        transcript = self.controller.get_current_transcript() if hasattr(self.controller, "get_current_transcript") else []
+        return self._result(True, data={"items": items, "current": current, "transcript": transcript})
+
+    def chat_new_session(self, title: str = "") -> dict:
+        if self.controller.is_busy:
+            return self._result(False, message="Session is busy. Stop current task first.", code="busy")
+        if not hasattr(self.controller, "create_session"):
+            return self._result(False, message="Controller does not support multi-session", code="unsupported")
+        sid = self.controller.create_session(title=title or "新会话")
+        transcript = self.controller.get_current_transcript() if hasattr(self.controller, "get_current_transcript") else []
+        return self._result(True, message="Session created", data={"session_id": sid, "transcript": transcript})
+
+    def chat_switch_session(self, session_id: str) -> dict:
+        if self.controller.is_busy:
+            return self._result(False, message="Session is busy. Stop current task first.", code="busy")
+        if not hasattr(self.controller, "switch_session"):
+            return self._result(False, message="Controller does not support multi-session", code="unsupported")
+        ok = self.controller.switch_session(session_id)
+        if not ok:
+            return self._result(False, message="Session not found", code="not_found")
+        transcript = self.controller.get_current_transcript() if hasattr(self.controller, "get_current_transcript") else []
+        current = self.controller.get_current_session() if hasattr(self.controller, "get_current_session") else {}
+        return self._result(True, message="Session switched", data={"current": current, "transcript": transcript})
+
+    def chat_rename_session(self, session_id: str, title: str) -> dict:
+        if self.controller.is_busy:
+            return self._result(False, message="Session is busy. Stop current task first.", code="busy")
+        if not hasattr(self.controller, "rename_session"):
+            return self._result(False, message="Controller does not support rename", code="unsupported")
+        ok = self.controller.rename_session(session_id, title)
+        if not ok:
+            return self._result(False, message="Session not found", code="not_found")
+        return self.chat_sessions()
+
+    def chat_delete_session(self, session_id: str) -> dict:
+        if self.controller.is_busy:
+            return self._result(False, message="Session is busy. Stop current task first.", code="busy")
+        if not hasattr(self.controller, "delete_session"):
+            return self._result(False, message="Controller does not support delete", code="unsupported")
+        ok = self.controller.delete_session(session_id)
+        if not ok:
+            return self._result(False, message="Session not found", code="not_found")
+        transcript = self.controller.get_current_transcript() if hasattr(self.controller, "get_current_transcript") else []
+        sessions = self.chat_sessions()
+        if isinstance(sessions, dict) and isinstance(sessions.get("data"), dict):
+            sessions["data"]["transcript"] = transcript
+        return sessions
 
     def chat_usage(self) -> dict:
         usage = self.controller.usage_snapshot() if hasattr(self.controller, "usage_snapshot") else {}

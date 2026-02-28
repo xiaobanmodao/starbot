@@ -1121,7 +1121,9 @@ class SkillManager:
         return results[: max(1, limit)]
 
     def build_recommendation_hint(self, task: str, limit: int = 3) -> str:
-        recs = self.recommend_skills(task, limit=limit)
+        recs = self.recommend_skills(task, limit=max(limit * 2, 4))
+        # Filter weak/noisy matches to avoid polluting ordinary chat.
+        recs = [r for r in recs if float(r.get("score", 0.0)) >= 3.0][: max(1, limit)]
         if not recs:
             return ""
         lines = [

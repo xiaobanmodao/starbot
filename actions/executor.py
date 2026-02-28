@@ -3,6 +3,7 @@ import subprocess
 import time
 import os
 import re
+import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import pyautogui
@@ -319,6 +320,11 @@ TOOLS_SCHEMA = [
                 "properties": {
                     "query": {"type": "string"},
                     "limit": {"type": "integer"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "knowledge", "project", "experience", "bug", "todo"],
+                        "description": "Optional category filter for precise recall",
+                    },
                 },
                 "required": ["query"],
             },
@@ -887,6 +893,35 @@ def execute(action: dict) -> dict:
     return _do_execute(name, args)
 
 
+def _find_window_hwnd_by_title(title: str):
+    import ctypes
+    target = (title or "").lower().strip()
+    found = []
+
+    def _cb(hwnd, _):
+        if not ctypes.windll.user32.IsWindowVisible(hwnd):
+            return True
+        buf = ctypes.create_unicode_buffer(512)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buf, 512)
+        val = buf.value or ""
+        if target in val.lower():
+            found.append((hwnd, val))
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+    ctypes.windll.user32.EnumWindows(WNDENUMPROC(_cb), 0)
+    return found[0] if found else (None, "")
+
+
+def _activate_window(hwnd):
+    import ctypes
+    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    try:
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
 def _do_execute(name: str, args: dict) -> dict:
     """实际执行逻辑。"""
     try:
@@ -904,7 +939,7 @@ def _do_execute(name: str, args: dict) -> dict:
 
         elif name == "scroll":
             mouse_scroll(args["x"], args["y"], args["clicks"])
-            return {"ok": True, "result": f"Scrolled {args['clicks']}"}
+            return {"ok": True, "result": f"Scrolled {args['clicks']} at ({args['x']},{args['y']})"}
 
         elif name == "double_click":
             mouse_double_click(args["x"], args["y"])
@@ -915,13 +950,34 @@ def _do_execute(name: str, args: dict) -> dict:
             return {"ok": True, "result": f"Moved to ({args['x']},{args['y']})"}
 
         elif name == "drag":
-            from actions.input_win32 import mouse_click, mouse_move
-            import ctypes
+            # Use low-level Win32 mouse events for real left-button drag
+            from ctypes import windll, Structure, Union, POINTER, c_ulong, c_long, sizeof, byref
+            INPUT_MOUSE = 0
+            MOUSEEVENTF_MOVE = 0x0001
+            MOUSEEVENTF_LEFTDOWN = 0x0002
+            MOUSEEVENTF_LEFTUP = 0x0004
+            MOUSEEVENTF_ABSOLUTE = 0x8000
+
+            class MOUSEINPUT(Structure):
+                _fields_ = [("dx", c_long), ("dy", c_long), ("mouseData", c_ulong),
+                            ("dwFlags", c_ulong), ("time", c_ulong), ("dwExtraInfo", POINTER(c_ulong))]
+            class _INPUT_UNION(Union):
+                _fields_ = [("mi", MOUSEINPUT)]
+            class INPUT(Structure):
+                _fields_ = [("type", c_ulong), ("_u", _INPUT_UNION)]
+
+            def _send(inp):
+                windll.user32.SendInput(1, byref(inp), sizeof(INPUT))
+
+            sw, sh = pyautogui.size()
+            def _abs(x, y):
+                return int(x * 65535 / (sw - 1)), int(y * 65535 / (sh - 1))
+
+            # move to start
             mouse_move(args["x1"], args["y1"])
-            # 用 SendInput 发送 mousedown，比 mouse_event 更可靠
-            from actions.input_win32 import _send, INPUT, _INPUT_UNION, MOUSEINPUT, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_ABSOLUTE, _screen_to_absolute
-            ax1, ay1 = _screen_to_absolute(args["x1"], args["y1"])
-            ax2, ay2 = _screen_to_absolute(args["x2"], args["y2"])
+            time.sleep(0.05)
+            ax1, ay1 = _abs(args["x1"], args["y1"])
+            ax2, ay2 = _abs(args["x2"], args["y2"])
             _send(INPUT(type=INPUT_MOUSE, _u=_INPUT_UNION(mi=MOUSEINPUT(
                 dx=ax1, dy=ay1, mouseData=0, dwFlags=MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_ABSOLUTE, time=0, dwExtraInfo=None))))
             time.sleep(0.05)
@@ -942,11 +998,10 @@ def _do_execute(name: str, args: dict) -> dict:
         elif name == "watch_screen":
             duration = args["duration"]
             interval = args.get("interval", 3)
-            frames_dir = os.path.join(_BASE_DIR, "logs", "frames")
+            root_frames_dir = os.path.join(_BASE_DIR, "logs", "frames")
+            run_id = time.strftime("%Y%m%d_%H%M%S")
+            frames_dir = os.path.join(root_frames_dir, f"watch_{run_id}")
             os.makedirs(frames_dir, exist_ok=True)
-            for old in os.listdir(frames_dir):
-                if old.endswith(".png"):
-                    os.remove(os.path.join(frames_dir, old))
             prev_gray = None
             key_frames = []
             end_time = time.time() + duration
@@ -991,25 +1046,31 @@ def _do_execute(name: str, args: dict) -> dict:
             offset = args.get("offset", 0)
             out_dir = os.path.join(_BASE_DIR, "logs", "subs")
             os.makedirs(out_dir, exist_ok=True)
-            # 如果是续读（offset>0），直接读已有字幕文件
-            existing = [f for f in os.listdir(out_dir) if f.endswith(".srt")]
-            if offset > 0 and existing:
-                with open(os.path.join(out_dir, existing[0]), "r", encoding="utf-8", errors="ignore") as fh:
+            url_key = hashlib.md5(url.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
+            # 优先读取当前 URL 的缓存字幕（支持 offset 续读）
+            srt_files = [f for f in os.listdir(out_dir) if f.endswith(".srt") and f"sub_{url_key}" in f]
+            sub_text = ""
+            if srt_files and offset >= 0:
+                with open(os.path.join(out_dir, srt_files[0]), "r", encoding="utf-8", errors="ignore") as fh:
                     sub_text = fh.read()
             else:
+                # 清理当前 URL 的旧缓存文件，不影响其他 URL 的缓存
                 for f in os.listdir(out_dir):
-                    os.remove(os.path.join(out_dir, f))
+                    if f"sub_{url_key}" in f:
+                        os.remove(os.path.join(out_dir, f))
+
+                out_tpl = os.path.join(out_dir, f"sub_{url_key}.%(ext)s")
                 for try_lang in [lang, "en"]:
                     subprocess.run(
                         ["yt-dlp", "--skip-download", "--write-auto-sub", "--write-sub",
                          "--sub-lang", try_lang, "--sub-format", "srt", "--convert-subs", "srt",
-                         "-o", f"{out_dir}/sub", url],
+                         "-o", out_tpl, url],
                         capture_output=True, text=True, timeout=60,
                     )
-                    srt_files = [f for f in os.listdir(out_dir) if f.endswith(".srt")]
+                    srt_files = [f for f in os.listdir(out_dir) if f.endswith(".srt") and f"sub_{url_key}" in f]
                     if srt_files:
                         break
-                srt_files = [f for f in os.listdir(out_dir) if f.endswith(".srt")]
                 if not srt_files:
                     return {"ok": False, "result": "No subtitles found"}
                 with open(os.path.join(out_dir, srt_files[0]), "r", encoding="utf-8", errors="ignore") as fh:
@@ -1064,9 +1125,22 @@ def _do_execute(name: str, args: dict) -> dict:
             try:
                 import pytesseract
                 text = pytesseract.image_to_string(img, lang="chi_sim+eng")
-            except (ImportError, Exception):
-                return {"ok": False, "result": "OCR unavailable. Install tesseract: https://github.com/tesseract-ocr/tesseract and pip install pytesseract"}
-            if not text.strip():
+            except ImportError:
+                return {
+                    "ok": False,
+                    "result": "OCR 不可用：缺少 pytesseract。请执行 `pip install pytesseract`，并安装 Tesseract 本体后重试。"
+                }
+            except Exception as e:
+                return {
+                    "ok": False,
+                    "result": (
+                        "OCR 执行失败。请确认已安装 Tesseract 并加入 PATH。"
+                        "\nWindows 可安装：winget install UB-Mannheim.TesseractOCR"
+                        "\n安装后可用 `tesseract --version` 验证。"
+                        f"\n错误详情: {e}"
+                    ),
+                }
+            if not (text or "").strip():
                 return {"ok": False, "result": "OCR found no text on screen"}
             return {"ok": True, "result": text.strip()[:3000]}
 
@@ -1076,21 +1150,85 @@ def _do_execute(name: str, args: dict) -> dict:
             return {"ok": True, "result": f"Opened {args['url']}"}
 
         elif name == "get_clipboard":
-            import ctypes
-            ctypes.windll.user32.OpenClipboard(0)
+            # 优先使用 pywin32，失败再回退到 ctypes 实现，尽量避免访问冲突
+            text = ""
             try:
-                h = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT=13
-                text = ctypes.wstring_at(h) if h else ""
-            finally:
-                ctypes.windll.user32.CloseClipboard()
-            return {"ok": True, "result": text[:2000] if text else "(clipboard empty)"}
+                try:
+                    import win32clipboard  # type: ignore
+                    import win32con  # type: ignore
+                except ImportError:
+                    win32clipboard = None  # type: ignore
+
+                if win32clipboard is not None:
+                    win32clipboard.OpenClipboard()
+                    try:
+                        if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                            data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                            text = data or ""
+                        else:
+                            text = ""
+                    finally:
+                        win32clipboard.CloseClipboard()
+                    return {"ok": True, "result": (text[:2000] if text else "(clipboard empty)")}
+
+                # ctypes 回退方案
+                import ctypes
+
+                CF_UNICODETEXT = 13
+                opened = False
+                try:
+                    # 剪贴板可能被其它进程短暂占用，做轻量重试
+                    for _ in range(5):
+                        if ctypes.windll.user32.OpenClipboard(0):
+                            opened = True
+                            break
+                        time.sleep(0.05)
+                    if not opened:
+                        return {"ok": False, "result": "剪贴板当前被占用，请稍后重试"}
+
+                    h = ctypes.windll.user32.GetClipboardData(CF_UNICODETEXT)
+                    if h:
+                        p = ctypes.windll.kernel32.GlobalLock(h)
+                        if p:
+                            try:
+                                text = ctypes.wstring_at(p)
+                            finally:
+                                ctypes.windll.kernel32.GlobalUnlock(h)
+                    return {"ok": True, "result": (text[:2000] if text else "(clipboard empty)")}
+                finally:
+                    if opened:
+                        try:
+                            ctypes.windll.user32.CloseClipboard()
+                        except Exception:
+                            pass
+            except Exception as e:
+                return {"ok": False, "result": f"读取剪贴板失败: {e}"}
 
         elif name == "run_command":
-            r = subprocess.run(
-                args["command"], shell=True, capture_output=True, text=True, timeout=30,
-            )
-            output = (r.stdout + r.stderr).strip()[:2000]
-            return {"ok": r.returncode == 0, "result": output or "(no output)"}
+            cmd = args["command"]
+            expect_path = (args.get("expect_path") or "").strip()
+            try:
+                r = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True, timeout=30,
+                )
+                stdout = r.stdout or ""
+                stderr = r.stderr or ""
+                output = (stdout + stderr).strip()[:2000]
+                return {"ok": r.returncode == 0, "result": output or "(no output)"}
+            except subprocess.TimeoutExpired as e:
+                # 超时软检查：如果调用方提供了期望文件路径且已生成，则视为成功但标记为超时完成
+                from pathlib import Path
+
+                stdout = (e.stdout or "") if hasattr(e, "stdout") else ""
+                stderr = (e.stderr or "") if hasattr(e, "stderr") else ""
+                output = (stdout + stderr).strip()[:2000]
+                if expect_path and Path(expect_path).expanduser().exists():
+                    msg = f"命令超时 (30s)，但检测到目标已存在: {expect_path}\n\n{output}"
+                    return {"ok": True, "result": msg.strip()}
+                return {
+                    "ok": False,
+                    "result": (f"命令在 30s 后超时: {cmd}\n\n{output}" if output else f"命令在 30s 后超时: {cmd}"),
+                }
 
         elif name == "web_search":
             results = _do_web_search(args["query"])
@@ -1123,7 +1261,8 @@ def _do_execute(name: str, args: dict) -> dict:
             return {"ok": True, "result": f"Skipped (duplicate already exists in {args['category']})"}
 
         elif name == "memory_recall":
-            results = _memory.search_multi(args["query"], args.get("limit", 5))
+            category = (args.get("category") or "").strip().lower() or None
+            results = _memory.search_multi(args["query"], args.get("limit", 5), category=category)
             if not results:
                 return {"ok": True, "result": "No memories found"}
             # 只返回 category 和 content，去掉 created_at 等无用字段
@@ -1252,45 +1391,24 @@ def _do_execute(name: str, args: dict) -> dict:
             return {"ok": True, "result": "\n".join(titles[:50])}
 
         elif name == "window_focus":
-            import ctypes
-            target = args["title"].lower()
-            found = []
-            def _cb(hwnd, _):
-                buf = ctypes.create_unicode_buffer(256)
-                ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
-                if target in buf.value.lower() and ctypes.windll.user32.IsWindowVisible(hwnd):
-                    found.append(hwnd)
-                return True
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
-            ctypes.windll.user32.EnumWindows(WNDENUMPROC(_cb), 0)
-            if not found:
+            hwnd, win_title = _find_window_hwnd_by_title(args["title"])
+            if not hwnd:
                 return {"ok": False, "result": f"未找到标题含 '{args['title']}' 的窗口"}
-            hwnd = found[0]
-            ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-            buf = ctypes.create_unicode_buffer(256)
-            ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
-            return {"ok": True, "result": f"已切换到窗口: {buf.value}"}
+            _activate_window(hwnd)
+            return {"ok": True, "result": f"已切换到窗口: {win_title}"}
 
         elif name == "window_resize":
             import ctypes
-            target = args["title"].lower()
-            state = args["state"]
-            found = []
-            def _cb(hwnd, _):
-                buf = ctypes.create_unicode_buffer(256)
-                ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
-                if target in buf.value.lower() and ctypes.windll.user32.IsWindowVisible(hwnd):
-                    found.append(hwnd)
-                return True
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
-            ctypes.windll.user32.EnumWindows(WNDENUMPROC(_cb), 0)
-            if not found:
+            target_state = args["state"]
+            hwnd, _ = _find_window_hwnd_by_title(args["title"])
+            if not hwnd:
                 return {"ok": False, "result": f"未找到标题含 '{args['title']}' 的窗口"}
-            hwnd = found[0]
             sw_map = {"maximize": 3, "minimize": 6, "restore": 9}
-            ctypes.windll.user32.ShowWindow(hwnd, sw_map[state])
-            return {"ok": True, "result": f"窗口已{state}"}
+            _activate_window(hwnd)
+            ok_sw = ctypes.windll.user32.ShowWindow(hwnd, sw_map[target_state])
+            if ok_sw == 0 and target_state != "minimize":
+                return {"ok": False, "result": f"窗口状态切换可能失败（{target_state}），请确认窗口权限/焦点"}
+            return {"ok": True, "result": f"窗口已{target_state}"}
 
         elif name == "wait_for_text":
             target = args["text"]
@@ -1357,23 +1475,72 @@ def _do_execute(name: str, args: dict) -> dict:
                 log_op("file_delete", path, backup)
                 note = "（已备份，可用 /rollback 恢复）" if backup else ""
                 return {"ok": True, "result": f"已删除: {path}{note}"}
+            except OSError as e:
+                if os.path.isdir(path):
+                    return {"ok": False, "result": f"删除失败：目录可能非空或被占用 ({e})"}
+                return {"ok": False, "result": str(e)}
             except Exception as e:
                 return {"ok": False, "result": str(e)}
 
         elif name == "set_clipboard":
-            import ctypes
             text = args["text"]
-            ctypes.windll.user32.OpenClipboard(0)
+            # 优先使用 pywin32，失败再回退 ctypes 实现
             try:
-                ctypes.windll.user32.EmptyClipboard()
-                h = ctypes.windll.kernel32.GlobalAlloc(0x0042, (len(text) + 1) * 2)
-                p = ctypes.windll.kernel32.GlobalLock(h)
-                ctypes.memmove(p, (text + "\0").encode("utf-16-le"), (len(text) + 1) * 2)
-                ctypes.windll.kernel32.GlobalUnlock(h)
-                ctypes.windll.user32.SetClipboardData(13, h)
-            finally:
-                ctypes.windll.user32.CloseClipboard()
-            return {"ok": True, "result": f"已设置剪贴板: {text[:50]}"}
+                try:
+                    import win32clipboard  # type: ignore
+                    import win32con  # type: ignore
+                except ImportError:
+                    win32clipboard = None  # type: ignore
+
+                if win32clipboard is not None:
+                    win32clipboard.OpenClipboard()
+                    try:
+                        win32clipboard.EmptyClipboard()
+                        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                    finally:
+                        win32clipboard.CloseClipboard()
+                    return {"ok": True, "result": f"已设置剪贴板: {text[:50]}"}
+
+                # ctypes 回退方案
+                import ctypes
+
+                CF_UNICODETEXT = 13
+                GMEM_MOVEABLE = 0x0002
+                GMEM_ZEROINIT = 0x0040
+
+                opened = False
+                try:
+                    for _ in range(5):
+                        if ctypes.windll.user32.OpenClipboard(0):
+                            opened = True
+                            break
+                        time.sleep(0.05)
+                    if not opened:
+                        return {"ok": False, "result": "剪贴板当前被占用，请稍后重试"}
+
+                    ctypes.windll.user32.EmptyClipboard()
+                    size = (len(text) + 1) * 2
+                    h = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size)
+                    if not h:
+                        return {"ok": False, "result": "分配剪贴板内存失败"}
+                    p = ctypes.windll.kernel32.GlobalLock(h)
+                    if not p:
+                        return {"ok": False, "result": "锁定剪贴板内存失败"}
+                    try:
+                        ctypes.memmove(p, (text + "\0").encode("utf-16-le"), size)
+                    finally:
+                        ctypes.windll.kernel32.GlobalUnlock(h)
+                    if not ctypes.windll.user32.SetClipboardData(CF_UNICODETEXT, h):
+                        return {"ok": False, "result": "SetClipboardData 调用失败"}
+                    return {"ok": True, "result": f"已设置剪贴板: {text[:50]}"}
+                finally:
+                    if opened:
+                        try:
+                            ctypes.windll.user32.CloseClipboard()
+                        except Exception:
+                            pass
+            except Exception as e:
+                return {"ok": False, "result": f"设置剪贴板失败: {e}"}
 
         elif name == "process_list":
             import psutil
@@ -1385,7 +1552,7 @@ def _do_execute(name: str, args: dict) -> dict:
             return {"ok": True, "result": "   PID   CPU    MEM  NAME\n" + "\n".join(procs)}
 
         elif name == "process_kill":
-            import psutil, signal
+            import psutil
             pid = args.get("pid")
             pname = args.get("name", "").lower()
             killed = []
@@ -1409,7 +1576,6 @@ def _do_execute(name: str, args: dict) -> dict:
 
         elif name == "notify":
             try:
-                import subprocess
                 title = args["title"].replace("'", "\\'")
                 msg = args["message"].replace("'", "\\'")
                 subprocess.Popen(
@@ -1437,29 +1603,24 @@ def _do_execute(name: str, args: dict) -> dict:
 
         elif name == "screenshot_window":
             import ctypes
-            target = args["title"].lower()
-            found = []
-            def _cb(hwnd, _):
-                buf = ctypes.create_unicode_buffer(256)
-                ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
-                if target in buf.value.lower() and ctypes.windll.user32.IsWindowVisible(hwnd):
-                    found.append(hwnd)
-                return True
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
-            ctypes.windll.user32.EnumWindows(WNDENUMPROC(_cb), 0)
-            if not found:
+            hwnd, win_title = _find_window_hwnd_by_title(args["title"])
+            if not hwnd:
                 return {"ok": False, "result": f"未找到窗口: {args['title']}"}
-            hwnd = found[0]
+            _activate_window(hwnd)
+            time.sleep(0.12)
             rect = ctypes.wintypes.RECT()
             ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
             x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
             if w <= 0 or h <= 0:
                 return {"ok": False, "result": "窗口尺寸无效"}
-            img = pyautogui.screenshot(region=(x, y, w, h))
+            try:
+                img = pyautogui.screenshot(region=(x, y, w, h))
+            except Exception as e:
+                return {"ok": False, "result": f"窗口截图失败（可能权限不足）: {e}"}
             base, ext = os.path.splitext(SCREENSHOT_PATH)
             path = f"{base}_window{ext or '.png'}"
             img.save(path)
-            return {"ok": True, "result": f"窗口截图 {w}x{h}", "image": path}
+            return {"ok": True, "result": f"窗口截图 {w}x{h} ({win_title})", "image": path}
 
         elif name == "find_image":
             try:
@@ -1481,11 +1642,17 @@ def _do_execute(name: str, args: dict) -> dict:
             last_err = None
             for attempt in range(3):
                 try:
-                    resp = requests.request(
-                        method, url, headers=headers,
-                        data=body.encode() if body else None,
-                        timeout=15,
-                    )
+                    req_kwargs = {"method": method, "url": url, "headers": headers, "timeout": 15}
+                    if body is not None:
+                        ctype = str(headers.get("Content-Type") or headers.get("content-type") or "").lower()
+                        if "application/json" in ctype:
+                            try:
+                                req_kwargs["json"] = json.loads(body)
+                            except Exception:
+                                req_kwargs["data"] = body.encode() if isinstance(body, str) else body
+                        else:
+                            req_kwargs["data"] = body.encode() if isinstance(body, str) else body
+                    resp = requests.request(**req_kwargs)
                     text = resp.text[:3000]
                     return {"ok": True, "result": f"HTTP {resp.status_code}\n{text}"}
                 except Exception as e:
@@ -1534,6 +1701,8 @@ def _do_execute(name: str, args: dict) -> dict:
                      "HKEY_LOCAL_MACHINE": winreg.HKEY_LOCAL_MACHINE,
                      "HKLM": winreg.HKEY_LOCAL_MACHINE,
                      "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT}
+            if "\\" not in key_path:
+                return {"ok": False, "result": f"注册表路径格式错误: {key_path}"}
             root_name, sub = key_path.split("\\", 1)
             root = roots.get(root_name.upper())
             if not root:
@@ -1552,6 +1721,8 @@ def _do_execute(name: str, args: dict) -> dict:
                      "HKCU": winreg.HKEY_CURRENT_USER,
                      "HKEY_LOCAL_MACHINE": winreg.HKEY_LOCAL_MACHINE,
                      "HKLM": winreg.HKEY_LOCAL_MACHINE}
+            if "\\" not in key_path:
+                return {"ok": False, "result": f"注册表路径格式错误: {key_path}"}
             root_name, sub = key_path.split("\\", 1)
             root = roots.get(root_name.upper())
             if not root:
@@ -1594,7 +1765,9 @@ def _do_execute(name: str, args: dict) -> dict:
             cmd = cmds.get(action)
             if not cmd:
                 return {"ok": False, "result": f"未知操作: {action}"}
-            subprocess.run(cmd, shell=True)
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if r.returncode != 0:
+                return {"ok": False, "result": r.stderr.strip() or f"执行失败: {action}"}
             return {"ok": True, "result": f"已执行: {action}"}
 
         elif name == "registry_delete_value":
@@ -1606,6 +1779,8 @@ def _do_execute(name: str, args: dict) -> dict:
                      "HKLM": winreg.HKEY_LOCAL_MACHINE,
                      "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT,
                      "HKEY_USERS": winreg.HKEY_USERS}
+            if "\\" not in key_path:
+                return {"ok": False, "result": f"注册表路径格式错误: {key_path}"}
             root_name, sub = key_path.split("\\", 1)
             root = roots.get(root_name.upper())
             if not root:
@@ -1628,6 +1803,8 @@ def _do_execute(name: str, args: dict) -> dict:
                      "HKLM": winreg.HKEY_LOCAL_MACHINE,
                      "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT,
                      "HKEY_USERS": winreg.HKEY_USERS}
+            if "\\" not in key_path:
+                return {"ok": False, "result": f"注册表路径格式错误: {key_path}"}
             root_name, sub = key_path.split("\\", 1)
             root = roots.get(root_name.upper())
             if not root:

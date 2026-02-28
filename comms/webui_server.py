@@ -93,6 +93,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if path == "/api/chat/events":
             limit = int((qs.get("limit") or ["200"])[0])
             return self._send_json(self.service.poll_chat_events(limit=limit))
+        if path == "/api/chat/sessions":
+            return self._send_json(self.service.chat_sessions())
         if path == "/api/status":
             return self._send_json(self.service.status())
         if path == "/api/doctor":
@@ -135,8 +137,19 @@ class _ApiHandler(BaseHTTPRequestHandler):
             return self._send_json(self.service.send_chat(text, attachments=attachments))
         if path == "/api/chat/stop":
             return self._send_json(self.service.stop_chat())
+        if path == "/api/chat/confirm":
+            approved = bool(payload.get("approved", False))
+            return self._send_json(self.service.confirm_chat(approved))
         if path == "/api/chat/reset":
             return self._send_json(self.service.reset_chat())
+        if path == "/api/chat/new":
+            return self._send_json(self.service.chat_new_session(str(payload.get("title", ""))))
+        if path == "/api/chat/switch":
+            return self._send_json(self.service.chat_switch_session(str(payload.get("session_id", ""))))
+        if path == "/api/chat/rename":
+            return self._send_json(self.service.chat_rename_session(str(payload.get("session_id", "")), str(payload.get("title", ""))))
+        if path == "/api/chat/delete":
+            return self._send_json(self.service.chat_delete_session(str(payload.get("session_id", ""))))
         if path == "/api/chat/usage":
             return self._send_json(self.service.chat_usage())
         if path == "/api/command":

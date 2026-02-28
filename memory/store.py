@@ -207,6 +207,33 @@ class MemoryStore:
             log.debug("memory stats error: %s", e)
             return {}
 
+    # ── Housekeeping / cleanup ────────────────────────────────────────────────
+
+    def cleanup_low_importance(self, *, max_age_days: int = 30, importance_threshold: int = 3) -> int:
+        """Delete low-importance, old memories to avoid长期堆积无关内容。
+
+        - importance ≤ importance_threshold
+        - created_at 早于 max_age_days 天前
+        Returns number of rows deleted.
+        """
+        importance_threshold = max(1, min(10, int(importance_threshold)))
+        try:
+            with self._lock:
+                cur = self._con.execute(
+                    """
+                    DELETE FROM memories
+                    WHERE importance <= ?
+                      AND datetime(created_at) <= datetime('now', ?)
+                    """,
+                    (importance_threshold, f"-{int(max_age_days)} days"),
+                )
+                self._con.commit()
+            self._pref_cache_time = 0
+            return cur.rowcount
+        except sqlite3.Error as e:
+            log.debug("memory cleanup_low_importance error: %s", e)
+            return 0
+
     # ── Keyword extraction ────────────────────────────────────────────────────
 
     @staticmethod
@@ -260,7 +287,7 @@ class MemoryStore:
         decay = math.exp(-age_days / 30.0)   # half-life 30 days
         return importance * decay
 
-    def _fts_one(self, token: str, limit: int) -> list[dict]:
+    def _fts_one(self, token: str, limit: int, category: str | None = None) -> list[dict]:
         """Single-keyword FTS5 search using subquery (avoids FTS virtual table JOIN issues).
 
         Uses phrase-quoted MATCH so trigram tokenizer treats the token as a
@@ -272,15 +299,26 @@ class MemoryStore:
         try:
             safe = token.replace('"', '""')
             with self._lock:
-                rows = self._con.execute(
-                    """SELECT id, category, content, importance, created_at FROM memories
-                       WHERE id IN (
-                           SELECT rowid FROM memories_fts
-                           WHERE memories_fts MATCH ?
-                       )
-                       LIMIT ?""",
-                    (f'"{safe}"', limit * 2),   # over-fetch, then re-rank
-                ).fetchall()
+                if category:
+                    rows = self._con.execute(
+                        """SELECT id, category, content, importance, created_at FROM memories
+                           WHERE category=? AND id IN (
+                               SELECT rowid FROM memories_fts
+                               WHERE memories_fts MATCH ?
+                           )
+                           LIMIT ?""",
+                        (category, f'"{safe}"', limit * 2),   # over-fetch, then re-rank
+                    ).fetchall()
+                else:
+                    rows = self._con.execute(
+                        """SELECT id, category, content, importance, created_at FROM memories
+                           WHERE id IN (
+                               SELECT rowid FROM memories_fts
+                               WHERE memories_fts MATCH ?
+                           )
+                           LIMIT ?""",
+                        (f'"{safe}"', limit * 2),   # over-fetch, then re-rank
+                    ).fetchall()
             items = [
                 {"id": r[0], "category": r[1], "content": r[2],
                  "importance": r[3] or 5, "created_at": r[4]}
@@ -292,16 +330,24 @@ class MemoryStore:
             log.debug("FTS search error for %r: %s", token, e)
             return []
 
-    def _like_one(self, token: str, limit: int) -> list[dict]:
+    def _like_one(self, token: str, limit: int, category: str | None = None) -> list[dict]:
         """Single-keyword LIKE search — always works, no minimum length."""
         try:
             with self._lock:
-                rows = self._con.execute(
-                    """SELECT id, category, content, importance, created_at FROM memories
-                       WHERE content LIKE ?
-                       LIMIT ?""",
-                    (f"%{token}%", limit * 2),
-                ).fetchall()
+                if category:
+                    rows = self._con.execute(
+                        """SELECT id, category, content, importance, created_at FROM memories
+                           WHERE category=? AND content LIKE ?
+                           LIMIT ?""",
+                        (category, f"%{token}%", limit * 2),
+                    ).fetchall()
+                else:
+                    rows = self._con.execute(
+                        """SELECT id, category, content, importance, created_at FROM memories
+                           WHERE content LIKE ?
+                           LIMIT ?""",
+                        (f"%{token}%", limit * 2),
+                    ).fetchall()
             items = [
                 {"id": r[0], "category": r[1], "content": r[2],
                  "importance": r[3] or 5, "created_at": r[4]}
@@ -329,7 +375,7 @@ class MemoryStore:
 
         return self._like_one(token, limit)
 
-    def search_multi(self, query: str, limit: int = 8) -> list[dict]:
+    def search_multi(self, query: str, limit: int = 8, category: str | None = None) -> list[dict]:
         """Multi-keyword search — the main entry-point for memory recall.
 
         Extracts every meaningful keyword from the query and searches for
@@ -340,6 +386,10 @@ class MemoryStore:
         keywords = self._keywords(query)
         seen: set[str] = set()
         results: list[dict] = []
+
+        cat = (category or "").strip().lower() or None
+        if cat and cat not in CATEGORIES:
+            cat = None
 
         def _add(items: list) -> None:
             for item in items:
@@ -353,7 +403,7 @@ class MemoryStore:
                 break
             need = max(2, limit - len(results))
             # FTS first, then LIKE if FTS gives nothing
-            found = self._fts_one(kw, need) or self._like_one(kw, need)
+            found = self._fts_one(kw, need, category=cat) or self._like_one(kw, need, category=cat)
             _add(found)
 
         # Bump access counts once for all found items
